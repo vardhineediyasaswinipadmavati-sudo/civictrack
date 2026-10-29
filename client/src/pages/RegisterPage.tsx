@@ -35,7 +35,7 @@ export const RegisterPage: React.FC = () => {
             <Layers className="w-6 h-6" />
           </div>
           <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">Citizen Registration</h2>
-          <p className="text-xs text-slate-500 mt-1">Join your community infrastructure network</p>
+          <p className="text-xs text-slate-500 mt-1">CivicTrack Academic Demonstration • Bhimavaram Context</p>
         </div>
 
         {error && (

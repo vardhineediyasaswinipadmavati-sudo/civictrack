@@ -1,3 +1,5 @@
+import bcrypt from 'bcryptjs';
+
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS departments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -220,6 +222,70 @@ CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_r
 CREATE INDEX IF NOT EXISTS idx_password_resets_hash ON password_resets(token_hash);
 `;
 
+export const DEFAULT_DEPARTMENTS = [
+  { name: 'Roads and Infrastructure', code: 'ROADS', contact_email: 'roads@civictrack.org', sla_hours: 48 },
+  { name: 'Electrical and Lighting', code: 'ELECTRICAL', contact_email: 'electrical@civictrack.org', sla_hours: 36 },
+  { name: 'Water Supply and Sewage', code: 'WATER', contact_email: 'water@civictrack.org', sla_hours: 24 },
+  { name: 'Solid Waste and Sanitation', code: 'SANITATION', contact_email: 'sanitation@civictrack.org', sla_hours: 24 },
+  { name: 'Public Facilities and Structures', code: 'FACILITIES', contact_email: 'facilities@civictrack.org', sla_hours: 72 }
+];
+
+export async function initDefaultData(db) {
+  const now = new Date().toISOString();
+  for (const dept of DEFAULT_DEPARTMENTS) {
+    const existing = db.get('SELECT id FROM departments WHERE code = ?', [dept.code]);
+    if (!existing) {
+      db.run(
+        `INSERT INTO departments (name, code, contact_email, sla_hours, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        [dept.name, dept.code, dept.contact_email, dept.sla_hours, now]
+      );
+    }
+  }
+
+  // Provision initial administrative and staff accounts if table is empty
+  const userCount = db.get('SELECT COUNT(*) as count FROM users');
+  if (!userCount || userCount.count === 0) {
+    // Only provision predictable demo accounts in non-production, test, or when explicitly allowed via ALLOW_DEMO_ACCOUNTS=true
+    const allowDemo = process.env.NODE_ENV !== 'production' || process.env.ALLOW_DEMO_ACCOUNTS === 'true';
+    const customAdminEmail = process.env.INITIAL_ADMIN_EMAIL;
+    const customAdminPass = process.env.INITIAL_ADMIN_PASSWORD;
+
+    if (customAdminEmail && customAdminPass) {
+      const passAdmin = await bcrypt.hash(customAdminPass, 10);
+      db.run(
+        `INSERT INTO users (name, email, password_hash, role, department_id, phone, created_at)
+         VALUES (?, ?, ?, 'admin', NULL, NULL, ?)`,
+        ['System Administrator', customAdminEmail.trim().toLowerCase(), passAdmin, now]
+      );
+    } else if (allowDemo) {
+      const roadsDept = db.get('SELECT id FROM departments WHERE code = "ROADS"');
+      const waterDept = db.get('SELECT id FROM departments WHERE code = "WATER"');
+      const passAdmin = await bcrypt.hash('admin123', 10);
+      const passStaff = await bcrypt.hash('staff123', 10);
+
+      db.run(
+        `INSERT INTO users (name, email, password_hash, role, department_id, phone, created_at)
+         VALUES (?, ?, ?, 'admin', NULL, '+91 98480 22101', ?)`,
+        ['Suresh Varma (Demo Municipal Commissioner)', 'admin@civictrack.org', passAdmin, now]
+      );
+
+      db.run(
+        `INSERT INTO users (name, email, password_hash, role, department_id, phone, created_at)
+         VALUES (?, ?, ?, 'department_staff', ?, '+91 98480 22102', ?)`,
+        ['Ramesh Naidu (Demo Roads Engineer)', 'roads.staff@civictrack.org', passStaff, roadsDept ? roadsDept.id : null, now]
+      );
+
+      db.run(
+        `INSERT INTO users (name, email, password_hash, role, department_id, phone, created_at)
+         VALUES (?, ?, ?, 'department_staff', ?, '+91 98480 22103', ?)`,
+        ['Priya Sharma (Demo Water Engineer)', 'water.staff@civictrack.org', passStaff, waterDept ? waterDept.id : null, now]
+      );
+    }
+  }
+}
+
 export async function initSchema(db) {
   db.exec(SCHEMA_SQL);
+  await initDefaultData(db);
 }

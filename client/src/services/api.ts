@@ -57,7 +57,12 @@ export const api = {
     return handleResponse(res);
   },
 
-  async forgotPassword(email: string): Promise<{ message: string; dev_reset_token?: string }> {
+  async forgotPassword(email: string): Promise<{
+    message: string;
+    email_service_configured?: boolean;
+    notice?: string;
+    required_env?: string[];
+  }> {
     const res = await fetch(`${API_BASE}/auth/forgot-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

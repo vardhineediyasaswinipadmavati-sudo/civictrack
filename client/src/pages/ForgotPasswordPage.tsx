@@ -8,7 +8,7 @@ export const ForgotPasswordPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [devToken, setDevToken] = useState<string | null>(null);
+  const [smtpMissing, setSmtpMissing] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,14 +20,12 @@ export const ForgotPasswordPage: React.FC = () => {
     setLoading(true);
     setError(null);
     setSuccessMessage(null);
-    setDevToken(null);
+    setSmtpMissing(false);
 
     try {
       const res = await api.forgotPassword(email.trim());
       setSuccessMessage(res.message);
-      if (res.dev_reset_token) {
-        setDevToken(res.dev_reset_token);
-      }
+      setSmtpMissing(res.email_service_configured === false);
     } catch (err: any) {
       setError(err.message || 'Unable to process your request. Please try again.');
     } finally {
@@ -43,7 +41,7 @@ export const ForgotPasswordPage: React.FC = () => {
             <Layers className="w-6 h-6" />
           </div>
           <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">Recover Password</h2>
-          <p className="text-xs text-slate-500 mt-1">Bhimavaram Municipal Infrastructure Management</p>
+          <p className="text-xs text-slate-500 mt-1">CivicTrack Academic Demonstration • Bhimavaram Dataset</p>
         </div>
 
         {error && (
@@ -55,25 +53,26 @@ export const ForgotPasswordPage: React.FC = () => {
 
         {successMessage ? (
           <div className="space-y-4">
-            <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs space-y-2">
-              <div className="flex items-center gap-2 font-semibold text-emerald-900">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>Instructions Sent</span>
+            <div className={`p-4 rounded-2xl text-xs space-y-2 border ${
+              smtpMissing
+                ? 'bg-amber-50 border-amber-200 text-amber-900'
+                : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+            }`}>
+              <div className="flex items-center gap-2 font-semibold">
+                {smtpMissing ? (
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                )}
+                <span>{smtpMissing ? 'Email Service Notice' : 'Request Processed'}</span>
               </div>
               <p>{successMessage}</p>
+              {smtpMissing && (
+                <p className="text-[11px] text-amber-800 leading-relaxed pt-1">
+                  Outgoing email service (SMTP) is not configured on this server environment. Password reset emails cannot be dispatched until the server is configured with valid SMTP credentials (<code className="bg-amber-100 px-1 py-0.5 rounded font-mono text-[10px]">SMTP_HOST</code>, <code className="bg-amber-100 px-1 py-0.5 rounded font-mono text-[10px]">SMTP_PORT</code>, <code className="bg-amber-100 px-1 py-0.5 rounded font-mono text-[10px]">SMTP_USER</code>, <code className="bg-amber-100 px-1 py-0.5 rounded font-mono text-[10px]">SMTP_PASS</code>).
+                </p>
+              )}
             </div>
-
-            {devToken && (
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-[11px] space-y-1.5">
-                <p className="font-semibold text-amber-900">Local Testing Link (Email Server Emulation):</p>
-                <Link
-                  to={`/reset-password?token=${devToken}`}
-                  className="inline-block text-civic-700 font-bold underline break-all hover:text-civic-800"
-                >
-                  Proceed to Reset Password Page &rarr;
-                </Link>
-              </div>
-            )}
 
             <div className="pt-2 text-center">
               <Link

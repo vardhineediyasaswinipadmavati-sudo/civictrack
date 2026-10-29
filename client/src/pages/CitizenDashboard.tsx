@@ -82,7 +82,7 @@ export const CitizenDashboard: React.FC = () => {
       <div className="bg-gradient-to-r from-civic-900 via-civic-800 to-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
         <div>
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-civic-500/20 text-civic-300 text-xs font-semibold mb-2">
-            <span>Bhimavaram Citizen Hub</span>
+            <span>Citizen Operations Hub • Bhimavaram Dataset</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
             Welcome back, {user?.name || user?.email || 'Citizen'}

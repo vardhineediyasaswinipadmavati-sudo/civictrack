@@ -83,7 +83,7 @@ export const StaffDashboard: React.FC = () => {
               <span>Field Engineering & Maintenance Triage</span>
             </div>
             <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300">
-              Bhimavaram Municipal Corporation
+              Bhimavaram Dataset (Demonstration)
             </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">

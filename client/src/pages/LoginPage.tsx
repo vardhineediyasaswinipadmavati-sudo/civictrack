@@ -46,7 +46,7 @@ export const LoginPage: React.FC = () => {
             <Layers className="w-6 h-6" />
           </div>
           <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">Sign In to CivicTrack</h2>
-          <p className="text-xs text-slate-500 mt-1">Bhimavaram Municipal Infrastructure Management</p>
+          <p className="text-xs text-slate-500 mt-1">CivicTrack Academic Demonstration • Bhimavaram Context</p>
         </div>
 
         {error && (
@@ -120,13 +120,54 @@ export const LoginPage: React.FC = () => {
             disabled={loading}
             className="w-full py-2.5 rounded-xl bg-civic-600 hover:bg-civic-700 disabled:bg-civic-300 disabled:cursor-not-allowed text-white font-bold text-xs shadow transition-all active:scale-95 flex items-center justify-center gap-1.5 mt-2"
           >
-            {loading ? 'Authenticating with Municipal Database...' : 'Sign In'}
+            {loading ? 'Authenticating...' : 'Sign In'}
             <ArrowRight className="w-4 h-4" />
           </button>
         </form>
 
-        <p className="text-center text-xs text-slate-500 mt-6">
-          Don't have an account?{' '}
+        <div className="mt-6 pt-5 border-t border-slate-100 text-xs text-slate-600 space-y-3">
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-[11px] text-slate-600 space-y-1.5 leading-relaxed">
+            <p className="font-semibold text-slate-800">Unified Role-Based Sign In:</p>
+            <p>
+              Citizens sign in with their registered email. Municipal engineers and administrators sign in using assigned official credentials. You will be automatically routed to your role dashboard.
+            </p>
+            <p className="text-[10px] text-slate-500 italic">
+              Staff and administrator accounts are provisioned by authorities and cannot be created through citizen registration.
+            </p>
+          </div>
+
+          <div className="p-3 bg-cyan-50/60 rounded-xl border border-cyan-100 text-[11px] text-cyan-950 space-y-2">
+            <div className="flex items-center justify-between font-bold text-cyan-900">
+              <span>Demonstration Accounts (Academic Evaluation):</span>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5 text-center font-medium">
+              <button
+                type="button"
+                onClick={() => { setEmail('citizen.alice@example.com'); setPassword('citizen123'); }}
+                className="py-1 px-1.5 bg-white border border-cyan-200 rounded text-cyan-800 hover:bg-cyan-100 text-[10px] font-semibold"
+              >
+                Citizen Demo
+              </button>
+              <button
+                type="button"
+                onClick={() => { setEmail('roads.staff@civictrack.org'); setPassword('staff123'); }}
+                className="py-1 px-1.5 bg-white border border-cyan-200 rounded text-cyan-800 hover:bg-cyan-100 text-[10px] font-semibold"
+              >
+                Staff Demo
+              </button>
+              <button
+                type="button"
+                onClick={() => { setEmail('admin@civictrack.org'); setPassword('admin123'); }}
+                className="py-1 px-1.5 bg-white border border-cyan-200 rounded text-cyan-800 hover:bg-cyan-100 text-[10px] font-semibold"
+              >
+                Admin Demo
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <p className="text-center text-xs text-slate-500 mt-5">
+          New citizen resident?{' '}
           <Link to="/register" className="font-semibold text-civic-600 hover:underline">
             Register as a citizen
           </Link>

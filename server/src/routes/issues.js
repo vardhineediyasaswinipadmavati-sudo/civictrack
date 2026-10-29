@@ -292,6 +292,20 @@ router.post('/:id/assign', authenticateToken, requireRole('admin'), async (req, 
       return res.status(404).json({ error: 'Shared issue not found.' });
     }
 
+    if (department_id) {
+      const targetDept = db.get('SELECT id FROM departments WHERE id = ?', [department_id]);
+      if (!targetDept) {
+        return res.status(400).json({ error: 'Selected department does not exist.' });
+      }
+    }
+
+    if (assigned_to_user_id) {
+      const targetUser = db.get('SELECT id FROM users WHERE id = ?', [assigned_to_user_id]);
+      if (!targetUser) {
+        return res.status(400).json({ error: 'Assigned staff user does not exist.' });
+      }
+    }
+
     const now = new Date().toISOString();
     const newStatus = currentIssue.status === 'Pending' ? 'Assigned' : currentIssue.status;
 

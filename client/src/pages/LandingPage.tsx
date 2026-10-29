@@ -369,13 +369,15 @@ export const LandingPage: React.FC = () => {
       </section>
 
       {/* Footer */}
-      <footer className="mt-auto border-t border-slate-200 bg-white px-4 py-8 text-center">
+      <footer className="mt-auto border-t border-slate-200 bg-white px-4 py-8 text-center space-y-2">
         <p className="font-bold text-slate-800">
           CivicTrack — Infrastructure Lifecycle Management System
         </p>
-        <p className="mt-2 text-xs text-slate-500">
-          Supporting better civic reporting, infrastructure monitoring and
-          maintenance planning.
+        <p className="text-xs text-slate-500">
+          Academic Demonstration Project (FSD) • Demonstrating infrastructure lifecycle tracking, duplicate report linking, and maintenance effectiveness.
+        </p>
+        <p className="text-[11px] text-slate-400 max-w-2xl mx-auto">
+          Notice: CivicTrack is an independent educational software project and is not an official municipal portal or affiliated with Bhimavaram Municipality. Demonstrations use realistic local Bhimavaram geography and simulated incident records.
         </p>
       </footer>
     </div>

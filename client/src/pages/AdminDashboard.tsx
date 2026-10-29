@@ -99,10 +99,10 @@ export const AdminDashboard: React.FC = () => {
           <div className="flex flex-wrap items-center gap-2 mb-2">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 text-xs font-semibold">
               <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
-              <span>Bhimavaram Municipal Command Center</span>
+              <span>Civic Operations Command Center</span>
             </div>
             <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300">
-              Demonstration Environment
+              Bhimavaram Demonstration Dataset
             </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">

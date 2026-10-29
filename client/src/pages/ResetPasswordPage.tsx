@@ -82,13 +82,13 @@ export const ResetPasswordPage: React.FC = () => {
             <Layers className="w-6 h-6" />
           </div>
           <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">Set New Password</h2>
-          <p className="text-xs text-slate-500 mt-1">Bhimavaram Municipal Infrastructure Management</p>
+          <p className="text-xs text-slate-500 mt-1">CivicTrack Academic Demonstration • Bhimavaram Dataset</p>
         </div>
 
         {validating ? (
           <div className="text-center py-8 text-xs text-slate-500 space-y-2">
             <div className="w-6 h-6 border-2 border-civic-600 border-t-transparent rounded-full animate-spin mx-auto" />
-            <p>Validating secure reset token with municipal server...</p>
+            <p>Validating secure reset token...</p>
           </div>
         ) : !tokenValid ? (
           <div className="space-y-4">

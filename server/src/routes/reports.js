@@ -80,11 +80,32 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 
     const now = new Date().toISOString();
-    const userId = req.user.id;
+    const userId = req.user && req.user.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required. No valid user ID found in session.' });
+    }
+    const userRecord = db.get('SELECT id FROM users WHERE id = ?', [userId]);
+    if (!userRecord) {
+      return res.status(401).json({ error: 'Authenticated user account was not found in the database. Please log in again.' });
+    }
+
     const reportCode = `REP-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 900 + 100)}`;
 
-    let sharedIssueId = confirmedExistingIssueId || null;
-    let linkType = confirmedExistingIssueId ? 'confirmed_duplicate' : 'original';
+    let sharedIssueId = null;
+    let linkType = 'original';
+
+    if (confirmedExistingIssueId !== undefined && confirmedExistingIssueId !== null && confirmedExistingIssueId !== '') {
+      const parsedIssueId = parseInt(confirmedExistingIssueId, 10);
+      if (isNaN(parsedIssueId) || parsedIssueId <= 0) {
+        return res.status(400).json({ error: 'Invalid shared issue ID provided.' });
+      }
+      const existingIssueCheck = db.get('SELECT * FROM shared_issues WHERE id = ?', [parsedIssueId]);
+      if (!existingIssueCheck) {
+        return res.status(404).json({ error: 'The selected shared issue does not exist.' });
+      }
+      sharedIssueId = parsedIssueId;
+      linkType = 'confirmed_duplicate';
+    }
 
     // SCENARIO 1: Citizen joins an existing shared issue
     if (sharedIssueId) {
@@ -198,8 +219,12 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // Auto-assign department based on category
     const deptCode = getDepartmentCodeForCategory(category);
-    const department = db.get('SELECT id, sla_hours FROM departments WHERE code = ?', [deptCode]);
-    const departmentId = department ? department.id : 1;
+    let department = db.get('SELECT id, name, sla_hours FROM departments WHERE code = ?', [deptCode]);
+    if (!department) {
+      // Safe fallback: match first active department in database
+      department = db.get('SELECT id, name, sla_hours FROM departments ORDER BY id ASC LIMIT 1');
+    }
+    const departmentId = department ? department.id : null;
     const slaHours = department ? department.sla_hours : 72;
 
     const issueCode = `CT-${Math.floor(100 + Math.random() * 900)}`;
@@ -364,6 +389,11 @@ router.post('/', authenticateToken, async (req, res) => {
     });
   } catch (err) {
     console.error('Report submission error:', err);
+    if (err && err.message && err.message.includes('FOREIGN KEY constraint failed')) {
+      return res.status(400).json({
+        error: 'Database reference validation failed: a referenced user, department, or issue was not found.'
+      });
+    }
     res.status(500).json({ error: 'Server error while submitting report.' });
   }
 });

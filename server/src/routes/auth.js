@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { getDb } from '../db/connection.js';
 import { generateToken, authenticateToken } from '../middleware/auth.js';
+import { getSmtpConfig, getCanonicalAppUrl, sendPasswordResetEmail } from '../services/emailService.js';
 
 const router = express.Router();
 
@@ -131,7 +132,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Forgot password request
+// Forgot password request - strictly protects token secrecy and account enumeration
 router.post('/forgot-password', async (req, res) => {
   try {
     const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
@@ -147,58 +148,91 @@ router.post('/forgot-password', async (req, res) => {
     const db = await getDb();
     const trimmedEmail = email.toLowerCase().trim();
     const user = db.get('SELECT id, name, email FROM users WHERE LOWER(TRIM(email)) = ?', [trimmedEmail]);
+    const smtpConfig = getSmtpConfig();
 
-    let safeTestingToken = null;
+    if (user && smtpConfig.configured) {
+      let tokenHash = null;
+      try {
+        // Generate cryptographically secure random token (256-bit entropy)
+        const rawToken = crypto.randomBytes(32).toString('hex');
+        tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+        const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour validity
+        const createdAt = new Date().toISOString();
 
-    if (user) {
-      // Generate cryptographically secure random token (64 hex characters)
-      const rawToken = crypto.randomBytes(32).toString('hex');
-      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-      const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour validity
-      const createdAt = new Date().toISOString();
+        // Invalidate previous unused reset tokens for this user
+        db.run(
+          'UPDATE password_resets SET used_at = ? WHERE user_id = ? AND used_at IS NULL',
+          [createdAt, user.id]
+        );
 
-      // Invalidate previous unused reset tokens for this user
-      db.run(
-        'UPDATE password_resets SET used_at = ? WHERE user_id = ? AND used_at IS NULL',
-        [createdAt, user.id]
-      );
+        // Store hashed token with expiry in database - raw token is NEVER stored
+        db.run(
+          `INSERT INTO password_resets (user_id, token_hash, expires_at, created_at)
+           VALUES (?, ?, ?, ?)`,
+          [user.id, tokenHash, expiresAt, createdAt]
+        );
 
-      // Store hashed token with expiry in database
-      db.run(
-        `INSERT INTO password_resets (user_id, token_hash, expires_at, created_at)
-         VALUES (?, ?, ?, ?)`,
-        [user.id, tokenHash, expiresAt, createdAt]
-      );
+        // Audit log entry
+        db.run(
+          `INSERT INTO audit_logs (action, entity_type, entity_id, user_id, details, created_at)
+           VALUES ('PASSWORD_RESET_REQUESTED', 'user', ?, ?, 'Password reset link requested', ?)`,
+          [user.id, user.id, createdAt]
+        );
 
-      // Audit log entry
-      db.run(
-        `INSERT INTO audit_logs (action, entity_type, entity_id, user_id, details, created_at)
-         VALUES ('PASSWORD_RESET_REQUESTED', 'user', ?, ?, 'Password reset link requested', ?)`,
-        [user.id, user.id, createdAt]
-      );
+        // Deliver email using canonical APP_URL
+        const canonicalBaseUrl = getCanonicalAppUrl();
+        const resetUrl = `${canonicalBaseUrl}/reset-password?token=${encodeURIComponent(rawToken)}`;
+        const deliveryResult = await sendPasswordResetEmail({ to: user.email, resetUrl });
 
-      // Check if SMTP is configured
-      if (process.env.SMTP_HOST && process.env.SMTP_USER) {
-        // In production with email provider configured, send email
-        // (email dispatch logic uses configured SMTP provider)
-      } else {
-        // Safe local evaluation notice without logging secrets to production output
-        if (process.env.NODE_ENV === 'test' || process.env.ENABLE_LOCAL_RESET_PREVIEW === 'true') {
-          safeTestingToken = rawToken;
+        if (!deliveryResult.success) {
+          const failureTime = new Date().toISOString();
+
+          // Immediately invalidate newly generated reset token so it cannot remain usable
+          db.run(
+            'UPDATE password_resets SET used_at = ?, expires_at = ? WHERE token_hash = ?',
+            [failureTime, failureTime, tokenHash]
+          );
+
+          db.run(
+            `INSERT INTO audit_logs (action, entity_type, entity_id, user_id, details, created_at)
+             VALUES ('PASSWORD_RESET_DELIVERY_FAILED', 'user', ?, ?, 'Password reset email delivery failed; token invalidated', ?)`,
+            [user.id, user.id, failureTime]
+          );
+
+          // Detailed delivery errors in server-side logs ONLY - never log raw tokens, reset URLs, passwords, or credentials
+          console.error(`Password reset email delivery failed for user ${user.id}:`, deliveryResult.error || 'Unknown transport error');
         }
+      } catch (userErr) {
+        // If an unexpected error occurred, invalidate any created token so it cannot remain usable
+        if (tokenHash) {
+          try {
+            const errTime = new Date().toISOString();
+            db.run(
+              'UPDATE password_resets SET used_at = ?, expires_at = ? WHERE token_hash = ?',
+              [errTime, errTime, tokenHash]
+            );
+          } catch (_) {}
+        }
+        console.error(`Unexpected error processing password reset for user ${user.id}:`, userErr.message || userErr);
       }
     }
 
-    // Generic response: Never disclose whether the account exists
-    const responsePayload = {
-      message: 'If an account exists with that email address, password reset instructions have been sent.'
-    };
-
-    if (safeTestingToken) {
-      responsePayload.dev_reset_token = safeTestingToken;
+    // Strictly prevent account enumeration across all outcomes (existing accounts, nonexistent accounts,
+    // SMTP delivery failures, and unexpected errors receive identical HTTP status codes and payloads).
+    // NEVER expose raw reset tokens or reset URLs in HTTP responses.
+    if (smtpConfig.configured) {
+      return res.json({
+        message: 'If an account exists with that email address, password reset instructions have been sent.',
+        email_service_configured: true
+      });
     }
 
-    res.json(responsePayload);
+    return res.json({
+      message: 'If an account exists with that email address, password reset instructions have been processed.',
+      email_service_configured: false,
+      notice: 'Outgoing SMTP email service is not configured on this server environment.',
+      required_env: ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS']
+    });
   } catch (err) {
     console.error('Forgot password error:', err);
     res.status(500).json({ error: 'Server error processing password reset request.' });
