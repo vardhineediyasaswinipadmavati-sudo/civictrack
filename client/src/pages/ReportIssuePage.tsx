@@ -51,7 +51,14 @@ export const ReportIssuePage: React.FC = () => {
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
-    const files = Array.from(e.target.files);
+    const selectedFiles = e.target.files;
+    const files: File[] = [];
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const file = selectedFiles.item(i);
+      if (file instanceof File) {
+        files.push(file);
+      }
+    }
     setImageFiles((prev) => [...prev, ...files]);
 
     const previews = files.map((f) => URL.createObjectURL(f));
