@@ -1,0 +1,22 @@
+{
+  "name": "civictrack-root",
+  "version": "1.0.0",
+  "description": "CivicTrack — Infrastructure Lifecycle Management System",
+  "scripts": {
+    "start": "node server/src/index.js",
+    "seed": "node server/src/db/seed.js",
+    "test": "node --test server/tests/*.test.js",
+    "build": "cd client && npm run build",
+    "dev:server": "cd server && npm run dev",
+    "dev:client": "cd client && npm run dev"
+  },
+  "keywords": [
+    "civictech",
+    "infrastructure-lifecycle",
+    "fsd",
+    "duplicate-detection",
+    "maintenance-waste"
+  ],
+  "author": "CivicTrack Development Team",
+  "license": "MIT"
+}
