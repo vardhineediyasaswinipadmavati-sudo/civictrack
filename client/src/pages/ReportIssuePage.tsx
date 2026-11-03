@@ -65,7 +65,7 @@ export const ReportIssuePage: React.FC = () => {
     setImagePreviews((prev) => [...prev, ...previews]);
   };
 
-  const executeSubmission = async (confirmedIssueId: number | null = null) => {
+  const executeSubmission = async (confirmedIssueId: string | number | null = null) => {
     setLoading(true);
     setError(null);
     try {

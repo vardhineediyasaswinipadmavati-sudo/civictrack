@@ -1,6 +1,24 @@
 import jwt from 'jsonwebtoken';
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'civictrack-super-secret-jwt-key-2024';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Ensure environment variables are loaded
+dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+dotenv.config();
+
+export function getJwtSecret() {
+  const secret = process.env.JWT_SECRET;
+  const isProduction = process.env.NODE_ENV === 'production';
+  if (isProduction && (!secret || secret === 'civictrack-super-secret-jwt-key-2024')) {
+    console.error('CRITICAL SECURITY CONFIGURATION ERROR: A strong, dedicated JWT_SECRET environment variable is strictly required in production mode.');
+  }
+  return secret || 'civictrack-super-secret-jwt-key-2024';
+}
 
 export function generateToken(user) {
   return jwt.sign(
@@ -11,7 +29,7 @@ export function generateToken(user) {
       role: user.role,
       department_id: user.department_id || null,
     },
-    JWT_SECRET,
+    getJwtSecret(),
     { expiresIn: '7d' }
   );
 }
@@ -26,7 +44,7 @@ export function authenticateToken(req, res, next) {
     return res.status(401).json({ error: 'Authentication required. No token provided.' });
   }
 
-  jwt.verify(token, JWT_SECRET, (err, user) => {
+  jwt.verify(token, getJwtSecret(), (err, user) => {
     if (err) {
       return res.status(403).json({ error: 'Invalid or expired authentication token.' });
     }
@@ -46,7 +64,7 @@ export function optionalAuth(req, res, next) {
     return next();
   }
 
-  jwt.verify(token, JWT_SECRET, (err, user) => {
+  jwt.verify(token, getJwtSecret(), (err, user) => {
     if (!err && user) {
       req.user = user;
     }
@@ -61,7 +79,11 @@ export function requireRole(...allowedRoles) {
       return res.status(401).json({ error: 'Authentication required.' });
     }
 
-    if (!allowedRoles.includes(req.user.role)) {
+    const normalize = (r) => (r === 'staff' ? 'department_staff' : r);
+    const normalizedAllowed = allowedRoles.map(normalize);
+    const userRole = normalize(req.user.role);
+
+    if (!normalizedAllowed.includes(userRole)) {
       return res.status(403).json({ 
         error: `Access denied. Requires one of roles: [${allowedRoles.join(', ')}]. Current role: ${req.user.role}` 
       });

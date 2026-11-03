@@ -1,17 +1,21 @@
 import express from 'express';
-import { getDb } from '../db/connection.js';
+import { Notification } from '../models/index.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const db = await getDb();
-    const notifications = db.all(
-      `SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 30`,
-      [req.user.id]
-    );
-    res.json(notifications);
+    const notifications = await Notification.find({ user_id: req.user.id })
+      .sort({ created_at: -1 })
+      .limit(30);
+
+    const formatted = notifications.map((n) => ({
+      ...n.toJSON(),
+      id: n._id.toString()
+    }));
+
+    res.json(formatted);
   } catch (err) {
     console.error('Fetch notifications error:', err);
     res.status(500).json({ error: 'Failed to fetch notifications.' });
@@ -20,10 +24,9 @@ router.get('/', authenticateToken, async (req, res) => {
 
 router.patch('/:id/read', authenticateToken, async (req, res) => {
   try {
-    const db = await getDb();
-    db.run(
-      'UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?',
-      [req.params.id, req.user.id]
+    await Notification.updateOne(
+      { _id: req.params.id, user_id: req.user.id },
+      { is_read: true }
     );
     res.json({ success: true });
   } catch (err) {
@@ -34,8 +37,7 @@ router.patch('/:id/read', authenticateToken, async (req, res) => {
 
 router.post('/read-all', authenticateToken, async (req, res) => {
   try {
-    const db = await getDb();
-    db.run('UPDATE notifications SET is_read = 1 WHERE user_id = ?', [req.user.id]);
+    await Notification.updateMany({ user_id: req.user.id }, { is_read: true });
     res.json({ success: true });
   } catch (err) {
     console.error('Read all error:', err);

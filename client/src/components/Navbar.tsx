@@ -97,9 +97,9 @@ export const Navbar: React.FC = () => {
                 <Link
                   key={link.label}
                   to={link.to}
-                  className={`rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
+                  className={`rounded-xl px-3 py-2 text-xs font-semibold transition-all ${
                     isActive(link.to)
-                      ? 'bg-cyan-50 text-cyan-800'
+                      ? 'bg-civic-50 text-civic-800 font-bold shadow-xs'
                       : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                   }`}
                 >
@@ -112,7 +112,7 @@ export const Navbar: React.FC = () => {
           <div className="flex items-center gap-2 sm:gap-3">
             <Link
               to="/report"
-              className="inline-flex items-center gap-1.5 rounded-lg bg-civic-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-civic-700 sm:px-3.5"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-civic-600 to-cyan-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:shadow-md hover:scale-[1.02] active:scale-95 sm:px-3.5"
             >
               <PlusCircle className="h-4 w-4" />
               <span className="hidden sm:inline">
@@ -125,22 +125,30 @@ export const Navbar: React.FC = () => {
               <div className="flex items-center gap-2">
                 <NotificationDropdown />
 
-                <div className="hidden items-center gap-2 border-l border-slate-200 pl-3 sm:flex">
-                  <div className="max-w-32 text-right">
+                <div className="hidden items-center gap-2.5 border-l border-slate-200 pl-3 sm:flex">
+                  <div className="max-w-36 text-right">
                     <p className="truncate text-xs font-semibold leading-tight text-slate-800">
                       {user?.name}
                     </p>
-                    <span className="text-[10px] font-medium capitalize text-slate-500">
+                    <span className={`inline-block px-1.5 py-0.5 mt-0.5 rounded-md text-[9px] font-bold border ${
+                      user?.role === 'admin'
+                        ? 'bg-purple-50 text-purple-700 border-purple-200'
+                        : user?.role === 'department_staff'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : 'bg-blue-50 text-blue-700 border-blue-200'
+                    }`}>
                       {user?.role === 'department_staff'
-                        ? 'Department Staff'
-                        : user?.role}
+                        ? 'Field Staff'
+                        : user?.role === 'admin'
+                        ? 'Admin'
+                        : 'Citizen'}
                     </span>
                   </div>
 
                   <button
                     type="button"
                     onClick={handleLogout}
-                    className="rounded-lg p-2 text-slate-500 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                    className="rounded-xl p-2 text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600"
                     title="Sign Out"
                     aria-label="Sign out"
                   >

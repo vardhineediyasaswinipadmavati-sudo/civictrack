@@ -1,65 +1,72 @@
 import express from 'express';
-import { getDb } from '../db/connection.js';
+import mongoose from 'mongoose';
+import {
+  InfrastructureAsset,
+  InfrastructureIncident,
+  RepairRecord,
+  SharedIssue,
+  CitizenReport,
+  ReportImage,
+  StatusHistory,
+  Notification,
+  Department
+} from '../models/index.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 import { calculateInfrastructureRisk } from '../utils/riskPredictor.js';
 
 const router = express.Router();
 
+// Helper to resolve asset by ObjectId or legacy_id
+async function findAsset(idOrLegacy) {
+  if (mongoose.Types.ObjectId.isValid(idOrLegacy)) {
+    return InfrastructureAsset.findById(idOrLegacy);
+  }
+  return InfrastructureAsset.findOne({ legacy_id: Number(idOrLegacy) });
+}
+
 // 1. List all infrastructure assets
 router.get('/', async (req, res) => {
   try {
-    const db = await getDb();
     const { category, health_status, risk_level, search } = req.query;
+    const filter = {};
 
-    let query = `
-      SELECT a.*,
-        (SELECT COUNT(DISTINCT r.id) 
-         FROM citizen_reports r 
-         JOIN shared_issues s ON r.shared_issue_id = s.id 
-         WHERE s.infrastructure_id = a.id) as total_citizen_reports,
-        (SELECT COUNT(*) FROM infrastructure_incidents inc WHERE inc.infrastructure_id = a.id) as unique_incidents_count,
-        (SELECT COUNT(*) FROM repair_records rep WHERE rep.infrastructure_id = a.id) as repair_attempts_count,
-        (SELECT MAX(completed_at) FROM repair_records rep WHERE rep.infrastructure_id = a.id) as last_repair_date
-      FROM infrastructure_assets a
-      WHERE 1=1
-    `;
-    const params = [];
-
-    if (category) {
-      query += ' AND a.category = ?';
-      params.push(category);
-    }
-
-    if (health_status) {
-      query += ' AND a.current_health_status = ?';
-      params.push(health_status);
-    }
-
-    if (risk_level) {
-      query += ' AND a.risk_level = ?';
-      params.push(risk_level);
-    }
+    if (category) filter.category = category;
+    if (health_status) filter.current_health_status = health_status;
+    if (risk_level) filter.risk_level = risk_level;
 
     if (search) {
-      query += ' AND (a.name LIKE ? OR a.asset_code LIKE ? OR a.address LIKE ?)';
-      const s = `%${search}%`;
-      params.push(s, s, s);
+      const reg = new RegExp(search, 'i');
+      filter.$or = [
+        { name: reg },
+        { asset_code: reg },
+        { address: reg }
+      ];
     }
 
-    query += ' ORDER BY a.risk_score DESC, a.name ASC';
+    const assets = await InfrastructureAsset.find(filter).sort({ risk_score: -1, name: 1 });
 
-    const assets = db.all(query, params);
+    const formatted = await Promise.all(
+      assets.map(async (a) => {
+        const assetId = a._id;
+        const [linkedIssues, incidentsCount, repairs] = await Promise.all([
+          SharedIssue.find({ infrastructure_id: assetId }).distinct('_id'),
+          InfrastructureIncident.countDocuments({ infrastructure_id: assetId }),
+          RepairRecord.find({ infrastructure_id: assetId }).sort({ completed_at: -1 })
+        ]);
 
-    // Parse risk_reasons JSON if present
-    const formatted = assets.map((asset) => {
-      let reasons = [];
-      try {
-        reasons = asset.risk_reasons ? JSON.parse(asset.risk_reasons) : [];
-      } catch (e) {
-        reasons = [asset.risk_reasons];
-      }
-      return { ...asset, risk_reasons: reasons };
-    });
+        const totalReports = await CitizenReport.countDocuments({ shared_issue_id: { $in: linkedIssues } });
+        const lastRepair = repairs.length > 0 ? repairs[0].completed_at : null;
+
+        return {
+          ...a.toJSON(),
+          id: a._id.toString(),
+          total_citizen_reports: totalReports,
+          unique_incidents_count: incidentsCount,
+          repair_attempts_count: repairs.length,
+          last_repair_date: lastRepair
+        };
+      })
+    );
 
     res.json(formatted);
   } catch (err) {
@@ -71,38 +78,33 @@ router.get('/', async (req, res) => {
 // 2. Create new infrastructure asset (Admin only)
 router.post('/', authenticateToken, requireRole('admin'), async (req, res) => {
   try {
-    const db = await getDb();
     const { asset_code, name, category, latitude, longitude, address, installation_date } = req.body;
 
     if (!asset_code || !name || !category || latitude === undefined || longitude === undefined) {
       return res.status(400).json({ error: 'Asset code, name, category, latitude, and longitude are required.' });
     }
 
-    const existing = db.get('SELECT id FROM infrastructure_assets WHERE asset_code = ?', [asset_code.trim().toUpperCase()]);
+    const trimmedCode = asset_code.trim().toUpperCase();
+    const existing = await InfrastructureAsset.findOne({ asset_code: trimmedCode });
     if (existing) {
       return res.status(409).json({ error: 'An asset with this code already exists.' });
     }
 
-    const now = new Date().toISOString();
-    const result = db.run(
-      `INSERT INTO infrastructure_assets (
-        asset_code, name, category, latitude, longitude, address,
-        installation_date, current_health_status, risk_score, risk_level,
-        risk_reasons, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'good', 10, 'Low', '["Newly commissioned infrastructure asset"]', ?)`,
-      [
-        asset_code.trim().toUpperCase(),
-        name.trim(),
-        category,
-        Number(latitude),
-        Number(longitude),
-        address || 'Recorded Location',
-        installation_date || now.split('T')[0],
-        now
-      ]
-    );
+    const newAsset = await InfrastructureAsset.create({
+      asset_code: trimmedCode,
+      name: name.trim(),
+      category,
+      latitude: Number(latitude),
+      longitude: Number(longitude),
+      address: address || 'Recorded Location',
+      installation_date: installation_date || new Date().toISOString().split('T')[0],
+      current_health_status: 'good',
+      risk_score: 10,
+      risk_level: 'Low',
+      risk_reasons: ['Newly commissioned infrastructure asset']
+    });
 
-    res.status(201).json({ message: 'Infrastructure asset created.', assetId: result.lastInsertRowid });
+    res.status(201).json({ message: 'Infrastructure asset created.', assetId: newAsset._id.toString() });
   } catch (err) {
     console.error('Create asset error:', err);
     res.status(500).json({ error: 'Failed to create infrastructure asset.' });
@@ -112,60 +114,73 @@ router.post('/', authenticateToken, requireRole('admin'), async (req, res) => {
 // 3. Dedicated Infrastructure Profile (Feature 3: Infrastructure Failure History)
 router.get('/:id', async (req, res) => {
   try {
-    const db = await getDb();
-    const assetId = req.params.id;
-
-    const asset = db.get('SELECT * FROM infrastructure_assets WHERE id = ?', [assetId]);
+    const asset = await findAsset(req.params.id);
     if (!asset) {
       return res.status(404).json({ error: 'Infrastructure asset not found.' });
     }
 
-    // Parse risk reasons
-    let riskReasons = [];
-    try {
-      riskReasons = asset.risk_reasons ? JSON.parse(asset.risk_reasons) : [];
-    } catch (e) {
-      riskReasons = [];
-    }
+    const assetId = asset._id;
 
     // Incidents
-    const incidents = db.all(`
-      SELECT inc.*, s.issue_code, s.status as issue_status,
-        (SELECT COUNT(*) FROM citizen_reports r WHERE r.shared_issue_id = s.id) as report_count
-      FROM infrastructure_incidents inc
-      LEFT JOIN shared_issues s ON inc.shared_issue_id = s.id
-      WHERE inc.infrastructure_id = ?
-      ORDER BY inc.started_at DESC
-    `, [assetId]);
+    const incidents = await InfrastructureIncident.find({ infrastructure_id: assetId })
+      .populate('shared_issue_id', 'issue_code status')
+      .sort({ started_at: -1 });
+
+    const formattedIncidents = await Promise.all(
+      incidents.map(async (inc) => {
+        const issue = inc.shared_issue_id;
+        const reportCount = issue
+          ? await CitizenReport.countDocuments({ shared_issue_id: issue._id })
+          : 0;
+
+        return {
+          ...inc.toJSON(),
+          id: inc._id.toString(),
+          issue_code: issue ? issue.issue_code : null,
+          issue_status: issue ? issue.status : null,
+          report_count: reportCount
+        };
+      })
+    );
 
     // Repairs
-    const repairs = db.all(`
-      SELECT rep.*, u.name as repaired_by_name, d.name as department_name,
-        (SELECT image_url FROM report_images img WHERE img.repair_id = rep.id AND img.image_type = 'before_repair' LIMIT 1) as before_image,
-        (SELECT image_url FROM report_images img WHERE img.repair_id = rep.id AND img.image_type = 'after_repair' LIMIT 1) as after_image
-      FROM repair_records rep
-      JOIN users u ON rep.repaired_by_user_id = u.id
-      JOIN departments d ON rep.department_id = d.id
-      WHERE rep.infrastructure_id = ?
-      ORDER BY rep.completed_at DESC
-    `, [assetId]);
+    const repairs = await RepairRecord.find({ infrastructure_id: assetId })
+      .populate('repaired_by_user_id', 'name')
+      .populate('department_id', 'name')
+      .sort({ completed_at: -1 });
+
+    const formattedRepairs = await Promise.all(
+      repairs.map(async (rep) => {
+        const [beforeImg, afterImg] = await Promise.all([
+          ReportImage.findOne({ repair_id: rep._id, image_type: 'before_repair' }),
+          ReportImage.findOne({ repair_id: rep._id, image_type: 'after_repair' })
+        ]);
+
+        return {
+          ...rep.toJSON(),
+          id: rep._id.toString(),
+          repaired_by_name: rep.repaired_by_user_id ? rep.repaired_by_user_id.name : 'Crew',
+          department_name: rep.department_id ? rep.department_id.name : 'Municipal Works',
+          before_image: beforeImg ? beforeImg.image_url : null,
+          after_image: afterImg ? afterImg.image_url : null
+        };
+      })
+    );
 
     // Total citizen reports across all issues linked to this asset
-    const reportsSummary = db.get(`
-      SELECT COUNT(DISTINCT r.id) as total_reports
-      FROM citizen_reports r
-      JOIN shared_issues s ON r.shared_issue_id = s.id
-      WHERE s.infrastructure_id = ?
-    `, [assetId]);
+    const linkedIssueIds = await SharedIssue.find({ infrastructure_id: assetId }).distinct('_id');
+    const totalReports = await CitizenReport.countDocuments({ shared_issue_id: { $in: linkedIssueIds } });
 
     // Cost summary
-    const costSummary = db.get(`
-      SELECT 
-        SUM(CASE WHEN cost_amount IS NOT NULL THEN cost_amount ELSE 0 END) as total_repair_cost,
-        COUNT(CASE WHEN cost_unavailable = 1 THEN 1 END) as unrecorded_cost_count
-      FROM repair_records
-      WHERE infrastructure_id = ?
-    `, [assetId]);
+    let totalRepairCost = 0;
+    let unrecordedCostCount = 0;
+    for (const r of repairs) {
+      if (r.cost_unavailable) {
+        unrecordedCostCount++;
+      } else if (r.cost_amount !== null && !isNaN(r.cost_amount)) {
+        totalRepairCost += Number(r.cost_amount);
+      }
+    }
 
     // Calculate MTBF (Mean Time Between Failures in days)
     let mtbfDays = null;
@@ -181,13 +196,23 @@ router.get('/:id', async (req, res) => {
     }
 
     // Active issues currently open
-    const activeIssues = db.all(`
-      SELECT s.*, (SELECT COUNT(*) FROM citizen_reports r WHERE r.shared_issue_id = s.id) as report_count
-      FROM shared_issues s
-      WHERE s.infrastructure_id = ? AND s.status != 'Resolved'
-    `, [assetId]);
+    const activeIssues = await SharedIssue.find({
+      infrastructure_id: assetId,
+      status: { $ne: 'Resolved' }
+    });
 
-    // Combined Chronological Timeline (Unified view of incidents and repairs)
+    const formattedActiveIssues = await Promise.all(
+      activeIssues.map(async (s) => {
+        const count = await CitizenReport.countDocuments({ shared_issue_id: s._id });
+        return {
+          ...s.toJSON(),
+          id: s._id.toString(),
+          report_count: count
+        };
+      })
+    );
+
+    // Combined Chronological Timeline
     const timeline = [];
     for (const inc of incidents) {
       timeline.push({
@@ -197,14 +222,15 @@ router.get('/:id', async (req, res) => {
         description: inc.description,
         code: inc.incident_code,
         sequence: inc.recurrence_sequence,
-        id: inc.id
+        id: inc._id.toString()
       });
     }
-    for (const rep of repairs) {
+
+    for (const rep of formattedRepairs) {
       timeline.push({
         type: 'repair',
         date: rep.completed_at,
-        title: `Maintenance: ${rep.repair_type.toUpperCase()} repair`,
+        title: `Maintenance: ${(rep.repair_type || 'STANDARD').toUpperCase()} repair`,
         description: rep.work_summary,
         code: rep.repair_code,
         cost: rep.cost_amount,
@@ -216,24 +242,25 @@ router.get('/:id', async (req, res) => {
         id: rep.id
       });
     }
+
     timeline.sort((a, b) => new Date(b.date) - new Date(a.date));
 
     res.json({
       asset: {
-        ...asset,
-        risk_reasons: riskReasons
+        ...asset.toJSON(),
+        id: asset._id.toString()
       },
       stats: {
-        totalCitizenReports: reportsSummary ? reportsSummary.total_reports : 0,
+        totalCitizenReports: totalReports,
         uniqueIncidentsCount: incidents.length,
         repairAttemptsCount: repairs.length,
         mtbfDays,
-        totalRepairCost: costSummary ? Math.round(costSummary.total_repair_cost) : 0,
-        unrecordedCostCount: costSummary ? costSummary.unrecorded_cost_count : 0
+        totalRepairCost: Math.round(totalRepairCost),
+        unrecordedCostCount
       },
-      incidents,
-      repairs,
-      activeIssues,
+      incidents: formattedIncidents,
+      repairs: formattedRepairs,
+      activeIssues: formattedActiveIssues,
       timeline
     });
   } catch (err) {
@@ -245,13 +272,16 @@ router.get('/:id', async (req, res) => {
 // 4. Record a Repair (Staff or Admin - Feature 4)
 router.post('/:id/repairs', authenticateToken, requireRole('admin', 'department_staff'), async (req, res) => {
   try {
-    const db = await getDb();
-    const assetId = req.params.id;
+    const asset = await findAsset(req.params.id);
+    if (!asset) {
+      return res.status(404).json({ error: 'Infrastructure asset not found.' });
+    }
+
     const {
       shared_issue_id,
       incident_id,
       department_id,
-      repair_type, // 'temporary', 'permanent', 'inspection_only', 'no_fault'
+      repair_type,
       cost_amount,
       cost_unavailable = false,
       materials_used,
@@ -269,122 +299,119 @@ router.post('/:id/repairs', authenticateToken, requireRole('admin', 'department_
       return res.status(400).json({ error: 'A clear work summary is required.' });
     }
 
-    const asset = db.get('SELECT * FROM infrastructure_assets WHERE id = ?', [assetId]);
-    if (!asset) {
-      return res.status(404).json({ error: 'Infrastructure asset not found.' });
+    let resolvedDeptId = req.user.department_id || department_id;
+    if (!resolvedDeptId) {
+      const firstDept = await Department.findOne();
+      resolvedDeptId = firstDept ? firstDept._id : null;
     }
 
-    const now = new Date().toISOString();
+    let resolvedIssueId = null;
+    if (shared_issue_id) {
+      if (mongoose.Types.ObjectId.isValid(shared_issue_id)) {
+        resolvedIssueId = shared_issue_id;
+      } else {
+        const issueDoc = await SharedIssue.findOne({ legacy_id: Number(shared_issue_id) });
+        if (issueDoc) resolvedIssueId = issueDoc._id;
+      }
+    }
+
     const repairCode = `REP-REC-${Math.floor(1000 + Math.random() * 9000)}`;
+    const now = new Date();
 
-    const userDept = req.user.department_id || department_id || 1;
-
-    const repairResult = db.run(
-      `INSERT INTO repair_records (
-        repair_code, infrastructure_id, incident_id, shared_issue_id,
-        repaired_by_user_id, department_id, repair_type, cost_amount,
-        cost_unavailable, materials_used, work_summary, completed_at, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        repairCode,
-        assetId,
-        incident_id || null,
-        shared_issue_id || null,
-        req.user.id,
-        userDept,
-        repair_type,
-        cost_unavailable ? null : (cost_amount ? Number(cost_amount) : null),
-        cost_unavailable ? 1 : 0,
-        materials_used || null,
-        work_summary.trim(),
-        now,
-        now
-      ]
-    );
-
-    const repairId = repairResult.lastInsertRowid;
+    const newRepair = await RepairRecord.create({
+      repair_code: repairCode,
+      infrastructure_id: asset._id,
+      incident_id: incident_id || null,
+      shared_issue_id: resolvedIssueId,
+      repaired_by_user_id: req.user.id,
+      department_id: resolvedDeptId,
+      repair_type,
+      cost_amount: cost_unavailable ? null : (cost_amount !== undefined && cost_amount !== null ? Number(cost_amount) : null),
+      cost_unavailable: Boolean(cost_unavailable),
+      materials_used: materials_used || null,
+      work_summary: work_summary.trim(),
+      completed_at: now
+    });
 
     // Attach before & after images
     if (before_image_url) {
-      db.run(
-        `INSERT INTO report_images (shared_issue_id, repair_id, image_url, image_type, created_at)
-         VALUES (?, ?, ?, 'before_repair', ?)`,
-        [shared_issue_id || null, repairId, before_image_url, now]
-      );
+      await ReportImage.create({
+        shared_issue_id: resolvedIssueId,
+        repair_id: newRepair._id,
+        image_url: before_image_url,
+        image_type: 'before_repair'
+      });
     }
+
     if (after_image_url) {
-      db.run(
-        `INSERT INTO report_images (shared_issue_id, repair_id, image_url, image_type, created_at)
-         VALUES (?, ?, ?, 'after_repair', ?)`,
-        [shared_issue_id || null, repairId, after_image_url, now]
-      );
+      await ReportImage.create({
+        shared_issue_id: resolvedIssueId,
+        repair_id: newRepair._id,
+        image_url: after_image_url,
+        image_type: 'after_repair'
+      });
     }
 
     // If linked to shared issue, transition issue to Resolved with resolutionType
-    if (shared_issue_id) {
-      db.run(
-        `UPDATE shared_issues 
-         SET status = 'Resolved', resolved_at = ?, resolution_type = ?, 
-             resolution_notes = ?, updated_at = ?
-         WHERE id = ?`,
-        [now, repair_type, work_summary.trim(), now, shared_issue_id]
-      );
+    if (resolvedIssueId) {
+      const issue = await SharedIssue.findById(resolvedIssueId);
+      if (issue) {
+        issue.status = 'Resolved';
+        issue.resolved_at = now;
+        issue.resolution_type = repair_type;
+        issue.resolution_notes = work_summary.trim();
+        issue.updated_at = now;
+        await issue.save();
 
-      db.run('UPDATE citizen_reports SET status = "Resolved" WHERE shared_issue_id = ?', [shared_issue_id]);
+        await CitizenReport.updateMany({ shared_issue_id: resolvedIssueId }, { status: 'Resolved' });
 
-      db.run(
-        `INSERT INTO status_history (shared_issue_id, old_status, new_status, changed_by_user_id, comments, created_at)
-         VALUES (?, 'In Progress', 'Resolved', ?, ?, ?)`,
-        [shared_issue_id, req.user.id, `Repair completed (${repair_type}): ${work_summary.trim()}`, now]
-      );
+        await StatusHistory.create({
+          shared_issue_id: resolvedIssueId,
+          old_status: 'In Progress',
+          new_status: 'Resolved',
+          changed_by_user_id: req.user.id,
+          comments: `Repair completed (${repair_type}): ${work_summary.trim()}`
+        });
 
-      // Notify linked citizens
-      const reporters = db.all('SELECT DISTINCT user_id FROM citizen_reports WHERE shared_issue_id = ?', [shared_issue_id]);
-      for (const r of reporters) {
-        db.run(
-          `INSERT INTO notifications (user_id, title, message, link_url, is_read, created_at)
-           VALUES (?, ?, ?, ?, 0, ?)`,
-          [
-            r.user_id,
-            'Repair Completed',
-            `Work has been completed on your reported issue (${repair_type}). Please help verify if the repair is effective!`,
-            `/issues/${shared_issue_id}`,
-            now
-          ]
-        );
+        // Notify linked citizens
+        const reporters = await CitizenReport.find({ shared_issue_id: resolvedIssueId }).distinct('user_id');
+        for (const uId of reporters) {
+          await Notification.create({
+            user_id: uId,
+            title: 'Repair Completed',
+            message: `Work has been completed on your reported issue (${repair_type}). Please help verify if the repair is effective!`,
+            link_url: `/issues/${resolvedIssueId.toString()}`,
+            is_read: false
+          });
+        }
       }
     }
 
     // Recalculate asset risk score & health status
-    const allIncidents = db.all('SELECT * FROM infrastructure_incidents WHERE infrastructure_id = ?', [assetId]);
-    const allRepairs = db.all('SELECT * FROM repair_records WHERE infrastructure_id = ?', [assetId]);
-    const openCount = db.get('SELECT COUNT(*) as count FROM shared_issues WHERE infrastructure_id = ? AND status != "Resolved"', [assetId]);
+    const allIncidents = await InfrastructureIncident.find({ infrastructure_id: asset._id });
+    const allRepairs = await RepairRecord.find({ infrastructure_id: asset._id });
+    const openCount = await SharedIssue.countDocuments({
+      infrastructure_id: asset._id,
+      status: { $ne: 'Resolved' }
+    });
 
     const updatedRisk = calculateInfrastructureRisk({
       asset,
       distinctIncidents: allIncidents,
       repairRecords: allRepairs,
-      unresolvedIssuesCount: openCount ? openCount.count : 0
+      unresolvedIssuesCount: openCount
     });
 
-    db.run(
-      `UPDATE infrastructure_assets 
-       SET current_health_status = ?, risk_score = ?, risk_level = ?, 
-           risk_reasons = ?, last_inspected_at = ?
-       WHERE id = ?`,
-      [
-        updatedRisk.healthStatus,
-        updatedRisk.riskScore,
-        updatedRisk.riskLevel,
-        JSON.stringify(updatedRisk.reasons),
-        now,
-        assetId
-      ]
-    );
+    asset.current_health_status = updatedRisk.healthStatus;
+    asset.risk_score = updatedRisk.riskScore;
+    asset.risk_level = updatedRisk.riskLevel;
+    asset.risk_reasons = updatedRisk.reasons;
+    asset.last_inspected_at = now;
+    await asset.save();
 
     res.status(201).json({
       message: 'Repair record logged successfully.',
-      repairId,
+      repairId: newRepair._id.toString(),
       repairCode,
       updatedHealthStatus: updatedRisk.healthStatus,
       updatedRiskScore: updatedRisk.riskScore

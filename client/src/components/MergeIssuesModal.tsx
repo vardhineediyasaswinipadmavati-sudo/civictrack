@@ -15,7 +15,7 @@ export const MergeIssuesModal: React.FC<Props> = ({
   onClose
 }) => {
   const [candidates, setCandidates] = useState<SharedIssue[]>([]);
-  const [selectedSourceId, setSelectedSourceId] = useState<number | ''>('');
+  const [selectedSourceId, setSelectedSourceId] = useState<string | number | ''>('');
   const [reason, setReason] = useState('Duplicate reports of same physical defect on site inspection');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -102,7 +102,7 @@ export const MergeIssuesModal: React.FC<Props> = ({
               <select
                 required
                 value={selectedSourceId}
-                onChange={(e) => setSelectedSourceId(e.target.value ? Number(e.target.value) : '')}
+                onChange={(e) => setSelectedSourceId(e.target.value || '')}
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-civic-500"
               >
                 <option value="">-- Choose issue to merge --</option>

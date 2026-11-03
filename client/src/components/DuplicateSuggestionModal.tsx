@@ -5,7 +5,7 @@ import { AlertTriangle, MapPin, Users, Calendar, ArrowRight, CheckCircle2, Eye, 
 
 interface Props {
   matches: DuplicateMatchItem[];
-  onConfirmExisting: (issueId: number) => void;
+  onConfirmExisting: (issueId: string | number) => void;
   onProceedAsDifferent: () => void;
   onCancel: () => void;
 }
@@ -16,7 +16,7 @@ export const DuplicateSuggestionModal: React.FC<Props> = ({
   onProceedAsDifferent,
   onCancel
 }) => {
-  const [selectedIssueId, setSelectedIssueId] = useState<number | null>(
+  const [selectedIssueId, setSelectedIssueId] = useState<string | number | null>(
     matches[0] ? matches[0].issueId : null
   );
   const [detailPreview, setDetailPreview] = useState<DuplicateMatchItem | null>(null);

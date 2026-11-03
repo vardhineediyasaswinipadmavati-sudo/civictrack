@@ -3,10 +3,10 @@ import { api } from '../services/api';
 import { Wrench, DollarSign, Camera, Check, X, AlertCircle } from 'lucide-react';
 
 interface Props {
-  assetId: number;
+  assetId: number | string;
   assetName: string;
-  sharedIssueId?: number | null;
-  incidentId?: number | null;
+  sharedIssueId?: number | string | null;
+  incidentId?: number | string | null;
   onSuccess: () => void;
   onClose: () => void;
 }

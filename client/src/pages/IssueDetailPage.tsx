@@ -108,7 +108,7 @@ export const IssueDetailPage: React.FC = () => {
     }
   };
 
-  const handleSeparateReport = async (reportId: number) => {
+  const handleSeparateReport = async (reportId: number | string) => {
     if (!id) return;
     const reason = prompt('Please specify reason for separating this report into an independent issue:');
     if (!reason) return;

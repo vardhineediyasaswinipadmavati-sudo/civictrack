@@ -25,7 +25,7 @@ export const NotificationDropdown: React.FC = () => {
     }
   }, [isOpen]);
 
-  const handleMarkRead = async (id: number) => {
+  const handleMarkRead = async (id: number | string) => {
     try {
       await api.markNotificationRead(id);
       setNotifications((prev) =>

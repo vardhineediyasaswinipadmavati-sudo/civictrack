@@ -22,9 +22,20 @@ async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let errorMsg = `Request failed (${res.status})`;
     try {
-      const data = await res.json();
-      errorMsg = data.error || errorMsg;
+      const text = await res.text();
+      try {
+        const data = JSON.parse(text);
+        errorMsg = data.error || data.message || errorMsg;
+      } catch {
+        if (text && text.length < 200 && !text.includes('<!DOCTYPE')) {
+          errorMsg = text;
+        }
+      }
     } catch (e) {}
+
+    if (res.status === 503) {
+      errorMsg = errorMsg || 'Municipal database service is temporarily unavailable. Please verify network access.';
+    }
     throw new Error(errorMsg);
   }
   return res.json();
@@ -32,11 +43,11 @@ async function handleResponse<T>(res: Response): Promise<T> {
 
 export const api = {
   // Auth
-  async login(email: string, password: string):Promise<{ user: User; token: string }> {
+  async login(email: string, password: string, role?: string): Promise<{ user: User; token: string }> {
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
+      body: JSON.stringify({ email, password, role })
     });
     return handleResponse(res);
   },
@@ -52,6 +63,30 @@ export const api = {
 
   async getCurrentUser(): Promise<{ user: User; unreadNotificationsCount: number }> {
     const res = await fetch(`${API_BASE}/auth/me`, {
+      headers: getAuthHeaders()
+    });
+    return handleResponse(res);
+  },
+
+  async provisionUser(data: {
+    name: string;
+    email: string;
+    password: string;
+    role: 'admin' | 'department_staff' | 'staff';
+    department_id?: string | number | null;
+    phone?: string;
+  }): Promise<{ user: User; message: string }> {
+    const res = await fetch(`${API_BASE}/auth/provision`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data)
+    });
+    return handleResponse(res);
+  },
+
+  async getMunicipalUsers(role?: string): Promise<User[]> {
+    const query = role ? `?role=${encodeURIComponent(role)}` : '';
+    const res = await fetch(`${API_BASE}/auth/users${query}`, {
       headers: getAuthHeaders()
     });
     return handleResponse(res);
@@ -114,10 +149,10 @@ export const api = {
     latitude: number;
     longitude: number;
     address?: string;
-    confirmedExistingIssueId?: number | null;
+    confirmedExistingIssueId?: string | number | null;
     isSafetyCritical?: boolean;
     imageUrls?: string[];
-  }): Promise<{ message: string; reportId: number; sharedIssueId: number; issueCode: string; isNewSharedIssue: boolean }> {
+  }): Promise<{ message: string; reportId: string | number; sharedIssueId: string | number; issueCode: string; isNewSharedIssue: boolean }> {
     const res = await fetch(`${API_BASE}/reports`, {
       method: 'POST',
       headers: getAuthHeaders(),
@@ -214,7 +249,7 @@ export const api = {
     return handleResponse(res);
   },
 
-  async assignIssue(id: number | string, data: { department_id?: number; assigned_to_user_id?: number; comments?: string }): Promise<any> {
+  async assignIssue(id: number | string, data: { department_id?: number | string; assigned_to_user_id?: number | string; comments?: string }): Promise<any> {
     const res = await fetch(`${API_BASE}/issues/${id}/assign`, {
       method: 'POST',
       headers: getAuthHeaders(),
@@ -299,9 +334,9 @@ export const api = {
   },
 
   async recordRepair(assetId: number | string, data: {
-    shared_issue_id?: number | null;
-    incident_id?: number | null;
-    department_id?: number;
+    shared_issue_id?: string | number | null;
+    incident_id?: string | number | null;
+    department_id?: string | number;
     repair_type: string;
     cost_amount?: number | null;
     cost_unavailable?: boolean;
@@ -363,7 +398,7 @@ export const api = {
     return handleResponse(res);
   },
 
-  async markNotificationRead(id: number): Promise<any> {
+  async markNotificationRead(id: number | string): Promise<any> {
     const res = await fetch(`${API_BASE}/notifications/${id}/read`, {
       method: 'PATCH',
       headers: getAuthHeaders()

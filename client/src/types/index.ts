@@ -1,31 +1,33 @@
 export type UserRole = 'citizen' | 'admin' | 'department_staff';
 
 export interface User {
-  id: number;
+  id: string | number;
   name: string;
   email: string;
   role: UserRole;
-  department_id?: number | null;
+  department_id?: string | number | null;
   department_name?: string | null;
+  department_code?: string | null;
   phone?: string | null;
   created_at: string;
 }
 
 export interface Department {
-  id: number;
+  id: string | number;
   name: string;
   code: string;
   contact_email: string;
   sla_hours: number;
   staff_count?: number;
   active_issues_count?: number;
+  created_at?: string;
 }
 
 export type HealthStatus = 'good' | 'monitoring' | 'warning' | 'critical';
 export type RiskLevel = 'Low' | 'Medium' | 'High' | 'Critical';
 
 export interface InfrastructureAsset {
-  id: number;
+  id: string | number;
   asset_code: string;
   name: string;
   category: string;
@@ -49,7 +51,7 @@ export type IssueStatus = 'Pending' | 'Assigned' | 'In Progress' | 'Resolved' | 
 export type IssueSeverity = 'Low' | 'Medium' | 'High' | 'Critical';
 
 export interface SharedIssue {
-  id: number;
+  id: string | number;
   issue_code: string;
   title: string;
   category: string;
@@ -61,17 +63,17 @@ export interface SharedIssue {
   latitude: number;
   longitude: number;
   address: string;
-  department_id?: number | null;
+  department_id?: string | number | null;
   department_name?: string | null;
   department_code?: string | null;
   sla_hours?: number;
-  infrastructure_id?: number | null;
+  infrastructure_id?: string | number | null;
   asset_name?: string | null;
   asset_code?: string | null;
   asset_health?: HealthStatus | null;
   asset_risk?: number | null;
-  incident_id?: number | null;
-  assigned_to_user_id?: number | null;
+  incident_id?: string | number | null;
+  assigned_to_user_id?: string | number | null;
   assigned_staff_name?: string | null;
   estimated_affected_population: number;
   affected_population_details?: string | null;
@@ -80,7 +82,7 @@ export interface SharedIssue {
   resolved_at?: string | null;
   resolution_notes?: string | null;
   resolution_type?: 'temporary' | 'permanent' | 'inspection_only' | 'no_fault' | null;
-  is_merged_into_id?: number | null;
+  is_merged_into_id?: string | number | null;
   citizen_reports_count?: number;
   primary_image?: string | null;
   created_at: string;
@@ -88,12 +90,12 @@ export interface SharedIssue {
 }
 
 export interface CitizenReport {
-  id: number;
+  id: string | number;
   report_code: string;
-  user_id: number;
+  user_id: string | number;
   reporter_name?: string;
   reporter_email?: string;
-  shared_issue_id?: number | null;
+  shared_issue_id?: string | number | null;
   issue_code?: string | null;
   shared_status?: IssueStatus | null;
   shared_title?: string | null;
@@ -116,10 +118,10 @@ export interface CitizenReport {
 }
 
 export interface ReportImage {
-  id: number;
-  report_id?: number | null;
-  shared_issue_id?: number | null;
-  repair_id?: number | null;
+  id: string | number;
+  report_id?: string | number | null;
+  shared_issue_id?: string | number | null;
+  repair_id?: string | number | null;
   image_url: string;
   caption?: string | null;
   image_type: 'evidence' | 'before_repair' | 'after_repair';
@@ -127,10 +129,10 @@ export interface ReportImage {
 }
 
 export interface InfrastructureIncident {
-  id: number;
+  id: string | number;
   incident_code: string;
-  infrastructure_id: number;
-  shared_issue_id?: number | null;
+  infrastructure_id: string | number;
+  shared_issue_id?: string | number | null;
   issue_code?: string | null;
   incident_type: string;
   description: string;
@@ -142,14 +144,14 @@ export interface InfrastructureIncident {
 }
 
 export interface RepairRecord {
-  id: number;
+  id: string | number;
   repair_code: string;
-  infrastructure_id: number;
-  incident_id?: number | null;
-  shared_issue_id?: number | null;
-  repaired_by_user_id: number;
+  infrastructure_id: string | number;
+  incident_id?: string | number | null;
+  shared_issue_id?: string | number | null;
+  repaired_by_user_id: string | number;
   repaired_by_name?: string;
-  department_id: number;
+  department_id: string | number;
   department_name?: string;
   repair_type: 'temporary' | 'permanent' | 'inspection_only' | 'no_fault';
   cost_amount?: number | null;
@@ -166,11 +168,11 @@ export interface RepairRecord {
 }
 
 export interface StatusHistoryItem {
-  id: number;
-  shared_issue_id: number;
+  id: string | number;
+  shared_issue_id: string | number;
   old_status: string;
   new_status: string;
-  changed_by_user_id: number;
+  changed_by_user_id: string | number;
   changed_by_name: string;
   changed_by_role: string;
   comments?: string | null;
@@ -178,9 +180,9 @@ export interface StatusHistoryItem {
 }
 
 export interface CitizenVerification {
-  id: number;
-  shared_issue_id: number;
-  user_id: number;
+  id: string | number;
+  shared_issue_id: string | number;
+  user_id: string | number;
   user_name: string;
   is_effective: number | boolean;
   feedback?: string | null;
@@ -188,8 +190,8 @@ export interface CitizenVerification {
 }
 
 export interface NotificationItem {
-  id: number;
-  user_id: number;
+  id: string | number;
+  user_id: string | number;
   title: string;
   message: string;
   link_url?: string | null;
@@ -198,7 +200,7 @@ export interface NotificationItem {
 }
 
 export interface DuplicateMatchItem {
-  issueId: number;
+  issueId: string | number;
   issueCode: string;
   title: string;
   category: string;

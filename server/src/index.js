@@ -1,10 +1,21 @@
-import express from 'express';
-import cors from 'cors';
+import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import dotenv from 'dotenv';
-import { getDb } from './db/connection.js';
-import { initSchema } from './db/schema.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Configure environment immediately before other imports
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+dotenv.config();
+
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import { connectMongo } from './db/connection.js';
+import { initDefaultData } from './db/mongoInit.js';
 
 import authRoutes from './routes/auth.js';
 import reportRoutes from './routes/reports.js';
@@ -14,20 +25,112 @@ import analyticsRoutes from './routes/analytics.js';
 import notificationRoutes from './routes/notifications.js';
 import departmentRoutes from './routes/departments.js';
 
-dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
-app.use(cors());
+// Security: Helmet HTTP Headers with CSP accommodating Leaflet maps, Cloudinary, and fonts
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+        imgSrc: [
+          "'self'",
+          'data:',
+          'blob:',
+          'https://*.tile.openstreetmap.org',
+          'https://*.openstreetmap.org',
+          'https://res.cloudinary.com',
+          'https://images.unsplash.com'
+        ],
+        connectSrc: [
+          "'self'",
+          'https://*.tile.openstreetmap.org',
+          'https://*.openstreetmap.org',
+          'https://res.cloudinary.com'
+        ]
+      }
+    },
+    crossOriginEmbedderPolicy: false
+  })
+);
+
+// Security: CORS Origin Restrictions with safe normalization
+const rawAppUrl = process.env.APP_URL;
+const cleanAppUrl = rawAppUrl ? rawAppUrl.replace(/\/+$/, '') : null;
+const allowedOrigins = [
+  cleanAppUrl,
+  cleanAppUrl ? `${cleanAppUrl}/` : null,
+  'https://civictrack-7gf8.onrender.com',
+  'http://localhost:5173',
+  'http://localhost:5000',
+  'http://localhost:3000',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:5000'
+].filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (mobile apps, curl, server-to-server)
+      if (!origin) return callback(null, true);
+      const normalizedOrigin = origin.replace(/\/+$/, '');
+      if (
+        allowedOrigins.includes(origin) ||
+        allowedOrigins.includes(normalizedOrigin) ||
+        process.env.NODE_ENV !== 'production' ||
+        /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+      ) {
+        return callback(null, true);
+      }
+      // Pass false to disallow cleanly without throwing an unhandled Error that causes HTTP 500
+      return callback(null, false);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+  })
+);
+
+// Rate Limiting
+const globalApiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 300,
+  message: { error: 'Too many requests from this IP. Please try again after 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const authRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  message: { error: 'Too many authentication attempts. Please try again after 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const uploadRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 40,
+  message: { error: 'Image upload rate limit reached. Please wait before uploading more files.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+app.use('/api/', globalApiLimiter);
+app.use('/api/auth/login', authRateLimiter);
+app.use('/api/auth/register', authRateLimiter);
+app.use('/api/auth/forgot-password', authRateLimiter);
+app.use('/api/reports/upload-image', uploadRateLimiter);
+
+// Body Parsers
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Static uploads serving
+// Static uploads serving (local fallback)
 app.use('/uploads', express.static(path.resolve(__dirname, 'uploads')));
 
 // Serve client production build
@@ -48,7 +151,8 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'online',
     system: 'CivicTrack — Infrastructure Lifecycle Management System',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
@@ -65,26 +169,25 @@ app.get('*', (req, res, next) => {
 
 // Centralized error handling middleware
 app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
+  console.error('Unhandled error:', err.message || err);
   res.status(err.status || 500).json({
     error: err.message || 'Internal server error occurred.'
   });
 });
 
-// Initialize database schema and start server
+// Initialize MongoDB connection, verify default data, and start server
 export async function startServer(port = PORT) {
   try {
-    const db = await getDb();
-    await initSchema(db);
-    console.log('✓ Database schema verified and ready');
-
-    return app.listen(port, () => {
-      console.log(`✓ CivicTrack API Server running on http://localhost:${port}`);
-    });
+    await connectMongo();
+    await initDefaultData();
+    console.log('✓ MongoDB Atlas connection verified and default data initialized');
   } catch (err) {
-    console.error('Failed to start server:', err);
-    process.exit(1);
+    console.warn('⚠ Initial MongoDB Atlas connection failed. Server starting in degraded mode; endpoints will return 503 until connection is established.');
   }
+
+  return app.listen(port, () => {
+    console.log(`✓ CivicTrack API Server running on http://localhost:${port}`);
+  });
 }
 
 // Auto-start when executed directly

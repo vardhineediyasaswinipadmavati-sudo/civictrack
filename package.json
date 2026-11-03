@@ -2,20 +2,31 @@
   "name": "civictrack-root",
   "version": "1.0.0",
   "description": "CivicTrack — Infrastructure Lifecycle Management System",
+  "private": true,
+  "workspaces": [
+    "server",
+    "client"
+  ],
   "scripts": {
     "start": "node server/src/index.js",
     "seed": "node server/src/db/seed.js",
+    "migrate:mongo": "node server/src/db/migrateSqliteToMongo.js",
     "test": "node --test server/tests/*.test.js",
-    "build": "cd client && npm install && npm run build",
-    "dev:server": "cd server && npm run dev",
-    "dev:client": "cd client && npm run dev"
+    "build": "npm --prefix client run build",
+    "dev:server": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "keywords": [
     "civictech",
     "infrastructure-lifecycle",
     "fsd",
     "duplicate-detection",
-    "maintenance-waste"
+    "maintenance-waste",
+    "mongodb-atlas",
+    "mongoose"
   ],
   "author": "CivicTrack Development Team",
   "license": "MIT"

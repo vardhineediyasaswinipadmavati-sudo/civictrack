@@ -8,7 +8,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   unreadCount: number;
-  login: (email: string, pass: string) => Promise<User>;
+  login: (email: string, pass: string, role?: string) => Promise<User>;
   register: (data: { name: string; email: string; password: string; phone?: string }) => Promise<User>;
   logout: () => void;
   refreshUser: () => Promise<void>;
@@ -50,10 +50,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     refreshUser();
   }, []);
 
-  const login = async (email: string, pass: string): Promise<User> => {
+  const login = async (email: string, pass: string, role?: string): Promise<User> => {
     setIsLoading(true);
     try {
-      const res = await api.login(email, pass);
+      const res = await api.login(email, pass, role);
       localStorage.setItem('civictrack_token', res.token);
       setToken(res.token);
 

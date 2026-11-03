@@ -1,19 +1,30 @@
 import express from 'express';
-import { getDb } from '../db/connection.js';
+import { Department, User, SharedIssue } from '../models/index.js';
 
 const router = express.Router();
 
 router.get('/', async (req, res) => {
   try {
-    const db = await getDb();
-    const departments = db.all(`
-      SELECT d.*, 
-        (SELECT COUNT(*) FROM users u WHERE u.department_id = d.id) as staff_count,
-        (SELECT COUNT(*) FROM shared_issues s WHERE s.department_id = d.id AND s.is_merged_into_id IS NULL) as active_issues_count
-      FROM departments d
-      ORDER BY d.name ASC
-    `);
-    res.json(departments);
+    const departments = await Department.find().sort({ name: 1 });
+
+    const result = await Promise.all(
+      departments.map(async (d) => {
+        const [staffCount, activeIssuesCount] = await Promise.all([
+          User.countDocuments({ department_id: d._id }),
+          SharedIssue.countDocuments({ department_id: d._id, is_merged_into_id: null })
+        ]);
+
+        const deptObj = d.toJSON();
+        return {
+          ...deptObj,
+          id: d._id.toString(),
+          staff_count: staffCount,
+          active_issues_count: activeIssuesCount
+        };
+      })
+    );
+
+    res.json(result);
   } catch (err) {
     console.error('Fetch departments error:', err);
     res.status(500).json({ error: 'Failed to fetch departments.' });

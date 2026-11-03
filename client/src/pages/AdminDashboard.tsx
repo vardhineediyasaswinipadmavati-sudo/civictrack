@@ -5,6 +5,7 @@ import { SharedIssue, Department } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
 import { PriorityBadge } from '../components/PriorityBadge';
 import { MergeIssuesModal } from '../components/MergeIssuesModal';
+import { ProvisionUserModal } from '../components/ProvisionUserModal';
 import {
   ShieldAlert,
   GitMerge,
@@ -20,7 +21,11 @@ import {
   Activity,
   UserCheck,
   RefreshCw,
-  FileText
+  FileText,
+  UserPlus,
+  Users,
+  ShieldCheck,
+  Wrench
 } from 'lucide-react';
 import { formatIndianNumber } from '../utils/currency';
 
@@ -34,24 +39,30 @@ export const AdminDashboard: React.FC = () => {
   const [selectedStatus, setSelectedStatus] = useState('');
   const [search, setSearch] = useState('');
 
+  // Municipal Personnel
+  const [municipalUsers, setMunicipalUsers] = useState<any[]>([]);
+  const [isProvisionModalOpen, setIsProvisionModalOpen] = useState(false);
+
   // Modals
   const [mergeTarget, setMergeTarget] = useState<SharedIssue | null>(null);
   const [assignIssue, setAssignIssue] = useState<SharedIssue | null>(null);
-  const [assignDeptId, setAssignDeptId] = useState<number | ''>('');
+  const [assignDeptId, setAssignDeptId] = useState<string | number | ''>('');
   const [assigning, setAssigning] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
     setError(null);
     try {
-      const [overview, allIssues, depts] = await Promise.all([
+      const [overview, allIssues, depts, users] = await Promise.all([
         api.getAnalyticsOverview(),
         api.getIssues(),
-        api.getDepartments()
+        api.getDepartments(),
+        api.getMunicipalUsers().catch(() => [])
       ]);
       setStats(overview);
       setIssues(allIssues || []);
       setDepartments(depts || []);
+      setMunicipalUsers(users || []);
     } catch (err: any) {
       console.error('Failed to load admin dashboard', err);
       setError(err?.message || 'Failed to fetch administrator metrics and issues from municipal server.');
@@ -69,7 +80,7 @@ export const AdminDashboard: React.FC = () => {
     if (!assignIssue || !assignDeptId) return;
     setAssigning(true);
     try {
-      await api.assignIssue(assignIssue.id, { department_id: Number(assignDeptId) });
+      await api.assignIssue(assignIssue.id, { department_id: assignDeptId });
       setAssignIssue(null);
       await loadData();
     } catch (err: any) {
@@ -113,7 +124,13 @@ export const AdminDashboard: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setIsProvisionModalOpen(true)}
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold shadow-md shadow-purple-600/25 transition-all flex items-center gap-1.5"
+          >
+            <UserPlus className="w-4 h-4" /> Provision Account
+          </button>
           <Link
             to="/analytics"
             className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors flex items-center gap-1.5"
@@ -384,6 +401,91 @@ export const AdminDashboard: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* Municipal Personnel & User Provisioning Section */}
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="p-6 sm:p-8 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold text-slate-900">Municipal Personnel & Operations Directory</h2>
+                  <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[11px] font-semibold border border-slate-200">
+                    {municipalUsers.length} Active Officers
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Authorized administrators and departmental field staff provisioned for Bhimavaram municipal governance
+                </p>
+              </div>
+
+              <button
+                onClick={() => setIsProvisionModalOpen(true)}
+                className="px-4 py-2 rounded-xl bg-civic-600 hover:bg-civic-700 text-white text-xs font-bold shadow transition-all flex items-center gap-1.5 self-start sm:self-auto"
+              >
+                <UserPlus className="w-4 h-4" /> Provision New Officer
+              </button>
+            </div>
+
+            {municipalUsers.length === 0 ? (
+              <div className="p-8 text-center text-slate-400 text-xs">
+                No municipal personnel records found. Use the button above to provision new staff or admin accounts.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50/80 text-slate-500 font-bold border-b border-slate-100">
+                    <tr>
+                      <th className="py-3 px-6">Officer Name</th>
+                      <th className="py-3 px-6">Official Email</th>
+                      <th className="py-3 px-6">Authority Level</th>
+                      <th className="py-3 px-6">Assigned Department</th>
+                      <th className="py-3 px-6">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {municipalUsers.map((u: any) => (
+                      <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="py-3.5 px-6 font-bold text-slate-900 flex items-center gap-2">
+                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${
+                            u.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+                          }`}>
+                            {u.role === 'admin' ? <ShieldCheck className="w-4 h-4" /> : <Wrench className="w-4 h-4" />}
+                          </div>
+                          <span>{u.name}</span>
+                        </td>
+                        <td className="py-3.5 px-6 text-slate-600 font-mono text-[11px]">{u.email}</td>
+                        <td className="py-3.5 px-6">
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                            u.role === 'admin'
+                              ? 'bg-purple-50 text-purple-700 border-purple-200'
+                              : 'bg-blue-50 text-blue-700 border-blue-200'
+                          }`}>
+                            {u.role === 'admin' ? 'Administrator' : 'Department Staff'}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-6">
+                          {u.department_name ? (
+                            <span className="font-semibold text-slate-800">
+                              {u.department_name} {u.department_code ? `(${u.department_code})` : ''}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 italic">Municipal Oversight (All)</span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-6">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                            u.is_active !== false ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                          }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${u.is_active !== false ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
+                            {u.is_active !== false ? 'Active Authorized' : 'Deactivated'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </>
       )}
 
@@ -401,7 +503,7 @@ export const AdminDashboard: React.FC = () => {
                 <select
                   required
                   value={assignDeptId}
-                  onChange={(e) => setAssignDeptId(e.target.value ? Number(e.target.value) : '')}
+                  onChange={(e) => setAssignDeptId(e.target.value || '')}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white"
                 >
                   <option value="">-- Choose Department --</option>
@@ -444,6 +546,14 @@ export const AdminDashboard: React.FC = () => {
           onClose={() => setMergeTarget(null)}
         />
       )}
+
+      {/* Provision Municipal User Modal */}
+      <ProvisionUserModal
+        isOpen={isProvisionModalOpen}
+        onClose={() => setIsProvisionModalOpen(false)}
+        onSuccess={loadData}
+        departments={departments}
+      />
     </div>
   );
 };

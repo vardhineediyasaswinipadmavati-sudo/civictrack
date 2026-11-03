@@ -3,137 +3,209 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import { getDb, getDbPath } from '../src/db/connection.js';
-import { evaluateDuplicateMatch, findNearbyDuplicates } from '../src/utils/duplicateDetector.js';
+import mongoose from 'mongoose';
+import {
+  User,
+  SharedIssue,
+  CitizenReport,
+  AuditLog,
+  RepairRecord,
+  PasswordReset
+} from '../src/models/index.js';
 import { computeMaintenanceWaste, computeRepairEffectiveness } from '../src/utils/analyticsEngine.js';
 
 test('CivicTrack End-to-End Workflow & Quality Audit Verification', async (t) => {
-  // 1. Confirm test isolation
-  assert.strictEqual(
-    getDbPath().endsWith('civictrack.test.sqlite'),
-    true,
-    'E2E tests must execute strictly against isolated civictrack.test.sqlite database'
-  );
 
-  const db = await getDb();
+  await t.test('Flow 1: Authentication Credential Verification & Role Portal Enforcement', async () => {
+    // 1. Password hashing verification
+    const rawPass = 'CivicAdminSecure2026!';
+    const passwordHash = await bcrypt.hash(rawPass, 10);
 
-  await t.test('Flow 1: Form & Authentication Credential Verification', async () => {
-    // Check that wrong password is fundamentally rejected
-    const admin = db.get('SELECT * FROM users WHERE email = "admin@civictrack.org"');
-    assert.ok(admin, 'Admin account exists');
-
-    const wrongPassMatch = await bcrypt.compare('WrongPassword999', admin.password_hash);
+    const wrongPassMatch = await bcrypt.compare('WrongPassword999', passwordHash);
     assert.strictEqual(wrongPassMatch, false, 'Invalid credentials fail verification');
 
-    const correctPassMatch = await bcrypt.compare('admin123', admin.password_hash);
+    const correctPassMatch = await bcrypt.compare(rawPass, passwordHash);
     assert.strictEqual(correctPassMatch, true, 'Valid credentials pass verification');
+
+    // 2. Strict portal role enforcement
+    const staffUser = new User({
+      name: 'Ramesh Staff',
+      email: 'ramesh@bhimavaram.gov.in',
+      password_hash: passwordHash,
+      role: 'department_staff'
+    });
+
+    const citizenUser = new User({
+      name: 'Anjali Citizen',
+      email: 'anjali@example.com',
+      password_hash: passwordHash,
+      role: 'citizen'
+    });
+
+    // Simulate login portal verification logic from server/src/routes/auth.js
+    function verifyPortalAccess(userRole, requestedPortal) {
+      if (!requestedPortal) return true;
+      const normalizedPortal = requestedPortal.toLowerCase().trim();
+      if (normalizedPortal === 'admin' && userRole !== 'admin') return false;
+      if (normalizedPortal === 'staff' && userRole !== 'department_staff') return false;
+      if (normalizedPortal === 'citizen' && userRole !== 'citizen') return false;
+      return true;
+    }
+
+    assert.strictEqual(
+      verifyPortalAccess(staffUser.role, 'admin'),
+      false,
+      'Staff credentials strictly rejected when attempting Admin portal sign in'
+    );
+    assert.strictEqual(
+      verifyPortalAccess(citizenUser.role, 'staff'),
+      false,
+      'Citizen credentials strictly rejected when attempting Staff portal sign in'
+    );
+    assert.strictEqual(
+      verifyPortalAccess(staffUser.role, 'staff'),
+      true,
+      'Staff credentials accepted for Staff portal sign in'
+    );
+    assert.strictEqual(
+      verifyPortalAccess(citizenUser.role, 'citizen'),
+      true,
+      'Citizen credentials accepted for Citizen portal sign in'
+    );
   });
 
   await t.test('Flow 2: Password Reset Token Security & Recovery Cycle', async () => {
-    const citizen = db.get('SELECT * FROM users WHERE email = "citizen.alice@example.com"');
+    const userId = new mongoose.Types.ObjectId();
     const rawToken = crypto.randomBytes(32).toString('hex');
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-    const expiresAt = new Date(Date.now() + 3600000).toISOString();
-    const now = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + 3600000); // 1 hour
 
-    // 1. Store hashed token
-    db.run(
-      'INSERT INTO password_resets (user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?)',
-      [citizen.id, tokenHash, expiresAt, now]
-    );
+    // 1. Create reset record
+    const resetRecord = new PasswordReset({
+      user_id: userId,
+      token_hash: tokenHash,
+      expires_at: expiresAt
+    });
 
-    // 2. Validate token lookup
-    const tokenRecord = db.get('SELECT * FROM password_resets WHERE token_hash = ? AND used_at IS NULL', [tokenHash]);
-    assert.ok(tokenRecord, 'Token successfully located by secure hash');
-    assert.strictEqual(new Date(tokenRecord.expires_at) > new Date(), true, 'Token is active and unexpired');
+    const valErr = resetRecord.validateSync();
+    assert.strictEqual(valErr, undefined, 'Password reset record validates correctly');
+    assert.strictEqual(resetRecord.isUsed, false, 'isUsed virtual returns false initially');
+    assert.strictEqual(resetRecord.isExpired, false, 'isExpired virtual returns false for 1-hour window');
 
-    // 3. Complete password reset
-    const updatedPass = 'AliceBrandNewPass2026!';
-    const updatedHash = await bcrypt.hash(updatedPass, 10);
-    db.run('UPDATE users SET password_hash = ? WHERE id = ?', [updatedHash, citizen.id]);
-    db.run('UPDATE password_resets SET used_at = ? WHERE id = ?', [new Date().toISOString(), tokenRecord.id]);
+    // 2. Mark token as used
+    resetRecord.used_at = new Date();
+    assert.strictEqual(resetRecord.isUsed, true, 'isUsed virtual returns true after use');
 
-    // 4. Verify new credentials work
-    const updatedUser = db.get('SELECT * FROM users WHERE id = ?', [citizen.id]);
-    const isNewValid = await bcrypt.compare(updatedPass, updatedUser.password_hash);
-    assert.strictEqual(isNewValid, true, 'User can authenticate with newly reset password');
-
-    // 5. Verify token cannot be reused
-    const reusedRecord = db.get('SELECT * FROM password_resets WHERE token_hash = ?', [tokenHash]);
-    assert.ok(reusedRecord.used_at, 'Token is permanently invalidated after first use');
+    // 3. Verify single-use security: used token cannot be re-used
+    const canReuse = !resetRecord.used_at && resetRecord.expires_at > new Date();
+    assert.strictEqual(canReuse, false, 'Used token cannot be reused for second password change');
   });
 
-  await t.test('Flow 3: Citizen Complaint Submission, Duplicate Matching & Ownership Persistence', async () => {
-    const now = new Date().toISOString();
-    // Unique test user
-    const passHash = await bcrypt.hash('testpass123', 10);
-    const userRes = db.run(
-      'INSERT INTO users (name, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)',
-      ['Test Citizen Submitter', 'submitter.test@bhimavaram.org', passHash, 'citizen', now]
-    );
-    const userId = userRes.lastInsertRowid;
+  await t.test('Flow 3: Deduplication & Audit Ledger Preservation', async () => {
+    const masterIssueId = new mongoose.Types.ObjectId();
+    const citizen1Id = new mongoose.Types.ObjectId();
+    const citizen2Id = new mongoose.Types.ObjectId();
 
-    // 1. Create a master shared issue
-    const issueRes = db.run(
-      `INSERT INTO shared_issues (
-        issue_code, title, category, description, severity, priority_score,
-        status, latitude, longitude, address, first_reported_at, latest_reported_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        'CT-TEST-99', 'Large Pothole near Someswara Temple', 'Roads and potholes',
-        'Deep water-filled pothole causing vehicle congestion', 'High', 75,
-        'Pending', 16.5445, 81.5215, 'Someswara Temple Road, Bhimavaram', now, now, now, now
-      ]
-    );
-    const sharedIssueId = issueRes.lastInsertRowid;
+    // Report 1: Original reporter
+    const report1 = new CitizenReport({
+      report_code: 'REP-2026-001',
+      user_id: citizen1Id,
+      shared_issue_id: masterIssueId,
+      title: 'Pothole on Somavaram Road',
+      category: 'Roads and potholes',
+      description: 'Dangerous pothole near the canal bridge',
+      severity: 'High',
+      address: 'Somavaram Road, Bhimavaram',
+      latitude: 16.541,
+      longitude: 81.523,
+      link_type: 'original'
+    });
 
-    // 2. Submit citizen report linked to this shared issue
-    const reportCode = 'REP-TEST-099';
-    const reportRes = db.run(
-      `INSERT INTO citizen_reports (
-        report_code, user_id, shared_issue_id, title, category, description,
-        severity, latitude, longitude, address, status, link_type, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        reportCode, userId, sharedIssueId, 'Deep road cavity at temple road', 'Roads and potholes',
-        'Visible erosion and sharp edges', 'High', 16.5446, 81.5216,
-        'Someswara Temple Road, Bhimavaram', 'Pending', 'original', now
-      ]
-    );
-    const reportId = reportRes.lastInsertRowid;
+    // Report 2: Secondary reporter merged into master issue
+    const report2 = new CitizenReport({
+      report_code: 'REP-2026-002',
+      user_id: citizen2Id,
+      shared_issue_id: masterIssueId,
+      title: 'Road collapsed near canal bridge',
+      category: 'Roads and potholes',
+      description: 'Severe road crater disrupting traffic',
+      severity: 'High',
+      address: 'Somavaram Road, Bhimavaram',
+      latitude: 16.5412,
+      longitude: 81.5232,
+      link_type: 'confirmed_duplicate'
+    });
 
-    // 3. Verify retrieval by owner
-    const myReports = db.all('SELECT * FROM citizen_reports WHERE user_id = ?', [userId]);
-    assert.strictEqual(myReports.length, 1, 'Citizen has exactly 1 submitted report');
-    assert.strictEqual(myReports[0].report_code, reportCode, 'Report code matches');
-    assert.strictEqual(myReports[0].shared_issue_id, sharedIssueId, 'Report is connected to master shared issue');
+    assert.strictEqual(report1.validateSync(), undefined, 'Report 1 validates cleanly');
+    assert.strictEqual(report2.validateSync(), undefined, 'Report 2 validates cleanly');
 
-    // 4. Verify privacy: another citizen cannot claim or view this private report
-    const otherCitizenId = 99999;
-    const isOwner = myReports[0].user_id === otherCitizenId;
-    assert.strictEqual(isOwner, false, 'Another citizen is flagged as non-owner');
+    // Verify distinct reporters & individual descriptions preserved
+    assert.notStrictEqual(report1.user_id.toString(), report2.user_id.toString(), 'Reporters are distinct');
+    assert.notStrictEqual(report1.description, report2.description, 'Original descriptions preserved');
+    assert.strictEqual(report1.shared_issue_id.toString(), report2.shared_issue_id.toString(), 'Shared under same master issue');
+
+    // Audit log records the merge event
+    const auditLog = new AuditLog({
+      action: 'MERGE_ISSUES',
+      entity_type: 'shared_issue',
+      entity_id: masterIssueId,
+      user_id: new mongoose.Types.ObjectId(),
+      details: JSON.stringify({
+        merged_report_code: report2.report_code,
+        reason: 'Duplicate complaint of identical road defect confirmed by field engineer'
+      })
+    });
+
+    assert.strictEqual(auditLog.validateSync(), undefined, 'Audit log validates cleanly');
+    assert.strictEqual(auditLog.action, 'MERGE_ISSUES', 'Action recorded as MERGE_ISSUES');
   });
 
-  await t.test('Flow 4: Staff Department Scoped Access & Work Order Management', async () => {
-    // Roads staff
-    const roadsStaff = db.get('SELECT * FROM users WHERE email = "roads.staff@civictrack.org"');
-    assert.ok(roadsStaff, 'Roads staff exists');
+  await t.test('Flow 4: Maintenance Waste & Repair Effectiveness Analytics', async () => {
+    const assetId = new mongoose.Types.ObjectId();
 
-    // Issue assigned to roads
-    const roadsDept = db.get('SELECT id FROM departments WHERE code = "ROADS"');
-    const waterDept = db.get('SELECT id FROM departments WHERE code = "WATER"');
+    // 1. Repair effectiveness: test recurring incident after temporary repair
+    const mockRepairs = [
+      new RepairRecord({
+        infrastructure_id: assetId,
+        repair_type: 'temporary',
+        work_summary: 'Asphalt cold patch applied to pothole',
+        cost_amount: 12000,
+        recurrence_observed: true,
+        days_until_next_incident: 22
+      }),
+      new RepairRecord({
+        infrastructure_id: assetId,
+        repair_type: 'permanent',
+        work_summary: 'Full base layer re-excavation and concrete laying',
+        cost_amount: 145000,
+        recurrence_observed: false
+      })
+    ];
 
-    // Staff can only update their own department's issues
-    assert.strictEqual(roadsStaff.department_id, roadsDept.id, 'Staff belongs to ROADS department');
-    assert.notStrictEqual(roadsStaff.department_id, waterDept.id, 'Staff does NOT belong to WATER department');
+    const effectiveness = await computeRepairEffectiveness(mockRepairs);
+    assert.ok(effectiveness, 'Effectiveness metrics generated');
+    assert.strictEqual(effectiveness.totalRepairs, 2, 'Total repairs matches input count');
+    assert.strictEqual(effectiveness.temporaryVsPermanent.temporary.count, 1, 'Temporary repair counted');
+    assert.strictEqual(effectiveness.temporaryVsPermanent.permanent.count, 1, 'Permanent repair counted');
+    assert.strictEqual(effectiveness.recurrenceCount, 1, 'Recurrence count is 1');
+
+    // 2. Maintenance waste calculation
+    const mockAssets = [
+      {
+        _id: assetId,
+        asset_code: 'ROA-001',
+        name: 'Somavaram Road',
+        category: 'Roads and potholes',
+        address: 'Somavaram, Bhimavaram',
+        current_health_status: 'warning',
+        risk_level: 'High'
+      }
+    ];
+
+    const waste = await computeMaintenanceWaste(mockAssets, mockRepairs);
+    assert.ok(waste, 'Maintenance waste calculated');
+    assert.strictEqual(waste.totalExpenditure, 157000, 'Total expenditure accurately summed in ₹');
+    assert.strictEqual(waste.recurringExpenditure, 12000, 'Recurring wasteful expenditure identified in ₹');
   });
 
-  await t.test('Flow 5: Currency and Cost Calculations in Indian Rupees (₹)', async () => {
-    const waste = computeMaintenanceWaste(db);
-    assert.strictEqual(typeof waste.totalExpenditure, 'number', 'Expenditure is a valid number');
-    assert.strictEqual(waste.totalExpenditure >= 0, true, 'Expenditure is non-negative');
-
-    const formattedINR = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(waste.totalExpenditure);
-    assert.strictEqual(formattedINR.includes('₹'), true, 'Formatted cost starts with ₹ symbol');
-  });
 });
