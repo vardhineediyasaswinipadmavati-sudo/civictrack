@@ -41,6 +41,8 @@ app.use(
           "'self'",
           'data:',
           'blob:',
+          'https://*.basemaps.cartocdn.com',
+          'https://basemaps.cartocdn.com',
           'https://*.tile.openstreetmap.org',
           'https://*.openstreetmap.org',
           'https://res.cloudinary.com',
@@ -48,8 +50,12 @@ app.use(
         ],
         connectSrc: [
           "'self'",
+          'https://*.basemaps.cartocdn.com',
+          'https://basemaps.cartocdn.com',
           'https://*.tile.openstreetmap.org',
           'https://*.openstreetmap.org',
+          'https://photon.komoot.io',
+          'https://api.bigdatacloud.net',
           'https://res.cloudinary.com'
         ]
       }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { MapPicker } from '../components/MapPicker';
@@ -31,8 +31,19 @@ export const ReportIssuePage: React.FC = () => {
   const [longitude, setLongitude] = useState(81.5212);
   const [address, setAddress] = useState('Main Road, Near Town Railway Station, Bhimavaram, Andhra Pradesh');
   const [isGeocoding, setIsGeocoding] = useState(false);
+  const [isAddressManuallyEdited, setIsAddressManuallyEdited] = useState(false);
+  const userEditTimestampRef = useRef<number>(0);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+
+  // Hard safety timeout for isGeocoding state to guarantee it never stays stuck
+  useEffect(() => {
+    if (!isGeocoding) return;
+    const safetyTimer = setTimeout(() => {
+      setIsGeocoding(false);
+    }, 4500);
+    return () => clearTimeout(safetyTimer);
+  }, [isGeocoding]);
 
   // Duplicate detection state
   const [duplicateMatches, setDuplicateMatches] = useState<DuplicateMatchItem[]>([]);
@@ -240,7 +251,20 @@ export const ReportIssuePage: React.FC = () => {
               setLatitude(lat);
               setLongitude(lon);
             }}
-            onAddressChange={(detectedAddress) => {
+            onAddressChange={(detectedAddress, requestTimestamp) => {
+              // Crucial Guard: Do NOT overwrite a manually edited address with a delayed geocoding response!
+              if (
+                userEditTimestampRef.current > 0 &&
+                requestTimestamp &&
+                userEditTimestampRef.current >= requestTimestamp
+              ) {
+                // User edited after this request was started -> do not overwrite
+                return;
+              }
+              if (isAddressManuallyEdited) {
+                // User has manually customized the address -> do not overwrite
+                return;
+              }
               if (detectedAddress) {
                 setAddress(detectedAddress);
               }
@@ -254,19 +278,38 @@ export const ReportIssuePage: React.FC = () => {
               <label className="block font-semibold text-slate-600">
                 Street Address / Landmark Details <span className="text-red-500">*</span>
               </label>
-              {isGeocoding && (
-                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-civic-700 bg-civic-50 px-2 py-0.5 rounded-full border border-civic-200 animate-pulse">
-                  <Loader2 className="w-3 h-3 animate-spin text-civic-600" />
-                  Detecting address...
-                </span>
-              )}
+              <div className="flex items-center gap-2">
+                {isGeocoding && (
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-civic-700 bg-civic-50 px-2 py-0.5 rounded-full border border-civic-200 animate-pulse">
+                    <Loader2 className="w-3 h-3 animate-spin text-civic-600" />
+                    Detecting address...
+                  </span>
+                )}
+                {isAddressManuallyEdited && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAddressManuallyEdited(false);
+                      userEditTimestampRef.current = 0;
+                    }}
+                    className="text-[11px] text-civic-600 hover:text-civic-800 underline font-medium"
+                    title="Allow map to update address on pin move"
+                  >
+                    Sync with pin
+                  </button>
+                )}
+              </div>
             </div>
             <input
               type="text"
               required
               placeholder="e.g. 2400 Oak Avenue outside Baker's square"
               value={address}
-              onChange={(e) => setAddress(e.target.value)}
+              onChange={(e) => {
+                userEditTimestampRef.current = Date.now();
+                setIsAddressManuallyEdited(true);
+                setAddress(e.target.value);
+              }}
               className="w-full px-3.5 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-civic-500"
             />
           </div>

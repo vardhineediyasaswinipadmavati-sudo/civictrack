@@ -47,7 +47,7 @@ interface Props {
   latitude: number;
   longitude: number;
   onChange: (lat: number, lon: number) => void;
-  onAddressChange?: (address: string) => void;
+  onAddressChange?: (address: string, requestTimestamp?: number) => void;
   onGeocodingLoading?: (loading: boolean) => void;
   height?: string;
 }
@@ -80,6 +80,84 @@ function formatAddress(data: any): string {
     }
   }
   return data.display_name || '';
+}
+
+// Robust multi-tier reverse geocoding with strict 4-second timeout and fallback
+async function reverseGeocodeCoords(
+  lat: number,
+  lon: number,
+  signal: AbortSignal
+): Promise<string> {
+  // Strategy 1: BigDataCloud client reverse geocoding (fast, free, client-side friendly, no 403 on cloud deployments)
+  try {
+    const bdcUrl = new URL('https://api.bigdatacloud.net/data/reverse-geocode-client');
+    bdcUrl.searchParams.set('latitude', String(lat));
+    bdcUrl.searchParams.set('longitude', String(lon));
+    bdcUrl.searchParams.set('localityLanguage', 'en');
+
+    const bdcRes = await fetch(bdcUrl.toString(), { signal });
+    if (bdcRes.ok) {
+      const data = await bdcRes.json();
+      const parts = [
+        data.locality || data.principalSubdivisionDescription,
+        data.city || 'Bhimavaram',
+        data.principalSubdivision || 'Andhra Pradesh'
+      ].filter(Boolean);
+
+      if (parts.length >= 2) {
+        return parts.join(', ');
+      }
+    }
+  } catch (err: any) {
+    if (err.name === 'AbortError') throw err;
+  }
+
+  // Strategy 2: Komoot Photon Reverse Geocode (free, fast, based on OSM data)
+  try {
+    const photonUrl = new URL('https://photon.komoot.io/reverse');
+    photonUrl.searchParams.set('lat', String(lat));
+    photonUrl.searchParams.set('lon', String(lon));
+
+    const pRes = await fetch(photonUrl.toString(), { signal });
+    if (pRes.ok) {
+      const pData = await pRes.json();
+      if (pData && pData.features && pData.features.length > 0) {
+        const prop = pData.features[0].properties || {};
+        const parts = [
+          prop.housenumber,
+          prop.street,
+          prop.district || prop.suburb,
+          prop.city || prop.town || 'Bhimavaram',
+          prop.state || 'Andhra Pradesh'
+        ].filter(Boolean);
+        if (parts.length >= 2) return parts.join(', ');
+        if (prop.name) return `${prop.name}, Bhimavaram, Andhra Pradesh`;
+      }
+    }
+  } catch (err: any) {
+    if (err.name === 'AbortError') throw err;
+  }
+
+  // Strategy 3: OpenStreetMap Nominatim reverse
+  try {
+    const nomUrl = new URL('https://nominatim.openstreetmap.org/reverse');
+    nomUrl.searchParams.set('format', 'jsonv2');
+    nomUrl.searchParams.set('lat', String(lat));
+    nomUrl.searchParams.set('lon', String(lon));
+    nomUrl.searchParams.set('addressdetails', '1');
+
+    const nomRes = await fetch(nomUrl.toString(), { signal });
+    if (nomRes.ok) {
+      const nomData = await nomRes.json();
+      const formatted = formatAddress(nomData);
+      if (formatted) return formatted;
+    }
+  } catch (err: any) {
+    if (err.name === 'AbortError') throw err;
+  }
+
+  // Fallback: Return clean coordinate representation so form is never stuck empty
+  return `Near Coordinates (${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E), Bhimavaram`;
 }
 
 // Draggable & clickable marker component
@@ -130,7 +208,7 @@ function LocationSearch({
   onAddressChange
 }: {
   onSelect: (lat: number, lon: number) => void;
-  onAddressChange?: (address: string) => void;
+  onAddressChange?: (address: string, requestTimestamp?: number) => void;
 }) {
   const map = useMap();
   const [query, setQuery] = useState('');
@@ -161,6 +239,9 @@ function LocationSearch({
     setResults([]);
     setIsOpen(true);
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+
     try {
       // 1. Try Photon Geocoding with Bhimavaram coordinate bias
       const photonUrl = new URL('https://photon.komoot.io/api/');
@@ -169,7 +250,7 @@ function LocationSearch({
       photonUrl.searchParams.set('lat', String(BHIMAVARAM_DEFAULT[0]));
       photonUrl.searchParams.set('lon', String(BHIMAVARAM_DEFAULT[1]));
 
-      const response = await fetch(photonUrl.toString());
+      const response = await fetch(photonUrl.toString(), { signal: controller.signal });
       if (response.ok) {
         const data = await response.json();
         const places: SearchResult[] = (data.features || []).map((feature: any) => {
@@ -194,6 +275,7 @@ function LocationSearch({
         if (places.length > 0) {
           setResults(places);
           setSearching(false);
+          clearTimeout(timeoutId);
           return;
         }
       }
@@ -205,7 +287,7 @@ function LocationSearch({
       nominatimUrl.searchParams.set('limit', '5');
       nominatimUrl.searchParams.set('addressdetails', '1');
 
-      const nomRes = await fetch(nominatimUrl.toString());
+      const nomRes = await fetch(nominatimUrl.toString(), { signal: controller.signal });
       if (nomRes.ok) {
         const nomData = await nomRes.json();
         const nomPlaces: SearchResult[] = (nomData || []).map((item: any) => ({
@@ -223,10 +305,13 @@ function LocationSearch({
       } else {
         setError('Location search currently unavailable.');
       }
-    } catch (err) {
-      console.warn('Geocoding search error:', err);
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        console.warn('Geocoding search error:', err);
+      }
       setError('Search lookup failed. You can click anywhere on the map directly.');
     } finally {
+      clearTimeout(timeoutId);
       setSearching(false);
     }
   };
@@ -235,7 +320,7 @@ function LocationSearch({
     map.flyTo([place.lat, place.lon], 16, { duration: 0.8 });
     onSelect(place.lat, place.lon);
     if (onAddressChange && place.address) {
-      onAddressChange(place.address);
+      onAddressChange(place.address, Date.now());
     }
     setQuery(place.name);
     setIsOpen(false);
@@ -437,53 +522,97 @@ export const MapPicker: React.FC<Props> = ({
 }) => {
   const [detecting, setDetecting] = useState(false);
 
+  // Keep references to latest callbacks so changes don't retrigger effects
+  const onAddressChangeRef = useRef(onAddressChange);
+  const onGeocodingLoadingRef = useRef(onGeocodingLoading);
+  useEffect(() => {
+    onAddressChangeRef.current = onAddressChange;
+    onGeocodingLoadingRef.current = onGeocodingLoading;
+  });
+
   const position: [number, number] = [
     typeof latitude === 'number' && !isNaN(latitude) && latitude !== 0 ? latitude : BHIMAVARAM_DEFAULT[0],
     typeof longitude === 'number' && !isNaN(longitude) && longitude !== 0 ? longitude : BHIMAVARAM_DEFAULT[1]
   ];
 
+  // Track initial mount and last geocoded position to avoid redundant requests
+  const isFirstMountRef = useRef(true);
+  const prevGeocodedCoordsRef = useRef<[number, number]>([position[0], position[1]]);
+  const activeControllerRef = useRef<AbortController | null>(null);
+
   // Automatic reverse geocoding with debounce whenever marker moves
   useEffect(() => {
-    if (!onAddressChange) return;
+    // If onAddressChange is not provided, nothing to do
+    if (!onAddressChangeRef.current) return;
 
+    // On initial mount, don't re-geocode if parent already has initial coordinates
+    if (isFirstMountRef.current) {
+      isFirstMountRef.current = false;
+      return;
+    }
+
+    const [curLat, curLon] = position;
+    const [prevLat, prevLon] = prevGeocodedCoordsRef.current;
+
+    // Check if coordinates moved significantly (more than ~1 meter)
+    if (Math.abs(curLat - prevLat) < 0.00001 && Math.abs(curLon - prevLon) < 0.00001) {
+      return;
+    }
+
+    // Cancel any in-flight request
+    if (activeControllerRef.current) {
+      activeControllerRef.current.abort();
+      activeControllerRef.current = null;
+    }
+
+    const requestTimestamp = Date.now();
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let abortTimeout: ReturnType<typeof setTimeout> | null = null;
     const controller = new AbortController();
-    setDetecting(true);
-    if (onGeocodingLoading) onGeocodingLoading(true);
+    activeControllerRef.current = controller;
 
-    const debounceTimer = setTimeout(async () => {
+    // Debounce the fetch by 400ms so rapid dragging doesn't flood requests
+    debounceTimer = setTimeout(async () => {
+      // Indicate loading
+      setDetecting(true);
+      onGeocodingLoadingRef.current?.(true);
+
+      // Hard safety timeout of 4 seconds
+      abortTimeout = setTimeout(() => {
+        controller.abort();
+      }, 4000);
+
       try {
-        const url = new URL('https://nominatim.openstreetmap.org/reverse');
-        url.searchParams.set('format', 'jsonv2');
-        url.searchParams.set('lat', String(position[0]));
-        url.searchParams.set('lon', String(position[1]));
-        url.searchParams.set('addressdetails', '1');
-
-        const response = await fetch(url.toString(), {
-          signal: controller.signal
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          const detectedAddress = formatAddress(data);
-          if (detectedAddress) {
-            onAddressChange(detectedAddress);
-          }
+        const detectedAddress = await reverseGeocodeCoords(curLat, curLon, controller.signal);
+        if (detectedAddress && !controller.signal.aborted) {
+          prevGeocodedCoordsRef.current = [curLat, curLon];
+          onAddressChangeRef.current?.(detectedAddress, requestTimestamp);
         }
       } catch (err: any) {
         if (err.name !== 'AbortError') {
           console.warn('Reverse geocoding error:', err.message);
         }
       } finally {
+        if (abortTimeout) clearTimeout(abortTimeout);
         setDetecting(false);
-        if (onGeocodingLoading) onGeocodingLoading(false);
+        onGeocodingLoadingRef.current?.(false);
+        if (activeControllerRef.current === controller) {
+          activeControllerRef.current = null;
+        }
       }
-    }, 600);
+    }, 400);
 
     return () => {
-      clearTimeout(debounceTimer);
+      if (debounceTimer) clearTimeout(debounceTimer);
+      if (abortTimeout) clearTimeout(abortTimeout);
       controller.abort();
+      setDetecting(false);
+      onGeocodingLoadingRef.current?.(false);
+      if (activeControllerRef.current === controller) {
+        activeControllerRef.current = null;
+      }
     };
-  }, [position[0], position[1], onAddressChange, onGeocodingLoading]);
+  }, [position[0], position[1]]);
 
   return (
     <div
@@ -508,8 +637,10 @@ export const MapPicker: React.FC<Props> = ({
         style={{ touchAction: 'pan-x pan-y' }}
       >
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener noreferrer">CARTO</a>'
+          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+          subdomains="abcd"
+          maxZoom={20}
         />
 
         {/* Location Search Bar */}
