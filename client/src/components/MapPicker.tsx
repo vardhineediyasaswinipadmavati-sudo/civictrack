@@ -47,7 +47,7 @@ interface Props {
   latitude: number;
   longitude: number;
   onChange: (lat: number, lon: number) => void;
-  onAddressChange?: (address: string, requestTimestamp?: number) => void;
+  onAddressChange?: (address: string, requestTimestamp?: number, isExplicitUserAction?: boolean) => void;
   onGeocodingLoading?: (loading: boolean) => void;
   height?: string;
 }
@@ -205,12 +205,11 @@ function DraggableLocationMarker({
 }
 
 // Location search bar component inside the map canvas
+// Location search bar component inside the map canvas
 function LocationSearch({
-  onSelect,
-  onAddressChange
+  onSelect
 }: {
-  onSelect: (lat: number, lon: number) => void;
-  onAddressChange?: (address: string, requestTimestamp?: number) => void;
+  onSelect: (lat: number, lon: number, address?: string) => void;
 }) {
   const map = useMap();
   const [query, setQuery] = useState('');
@@ -231,99 +230,9 @@ function LocationSearch({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleSearch = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const cleanQuery = query.trim();
-    if (!cleanQuery) return;
-
-    setSearching(true);
-    setError('');
-    setResults([]);
-    setIsOpen(true);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-    try {
-      // 1. Try Photon Geocoding with Bhimavaram coordinate bias
-      const photonUrl = new URL('https://photon.komoot.io/api/');
-      photonUrl.searchParams.set('q', cleanQuery);
-      photonUrl.searchParams.set('limit', '5');
-      photonUrl.searchParams.set('lat', String(BHIMAVARAM_DEFAULT[0]));
-      photonUrl.searchParams.set('lon', String(BHIMAVARAM_DEFAULT[1]));
-
-      const response = await fetch(photonUrl.toString(), { signal: controller.signal });
-      if (response.ok) {
-        const data = await response.json();
-        const places: SearchResult[] = (data.features || []).map((feature: any) => {
-          const p = feature.properties || {};
-          const coords = feature.geometry.coordinates;
-          const address = [
-            p.housenumber,
-            p.street,
-            p.suburb || p.district,
-            p.city || p.town || p.village || 'Bhimavaram',
-            p.state || 'Andhra Pradesh'
-          ].filter(Boolean).join(', ');
-
-          return {
-            name: p.name || p.street || address || 'Search location',
-            lat: Number(coords[1].toFixed(6)),
-            lon: Number(coords[0].toFixed(6)),
-            address: address || p.name || ''
-          };
-        });
-
-        if (places.length > 0) {
-          setResults(places);
-          setSearching(false);
-          clearTimeout(timeoutId);
-          return;
-        }
-      }
-
-      // 2. Fallback to OpenStreetMap Nominatim search
-      const nominatimUrl = new URL('https://nominatim.openstreetmap.org/search');
-      nominatimUrl.searchParams.set('format', 'jsonv2');
-      nominatimUrl.searchParams.set('q', `${cleanQuery}, Bhimavaram`);
-      nominatimUrl.searchParams.set('limit', '5');
-      nominatimUrl.searchParams.set('addressdetails', '1');
-
-      const nomRes = await fetch(nominatimUrl.toString(), { signal: controller.signal });
-      if (nomRes.ok) {
-        const nomData = await nomRes.json();
-        const nomPlaces: SearchResult[] = (nomData || []).map((item: any) => ({
-          name: item.name || item.display_name.split(',')[0],
-          lat: Number(parseFloat(item.lat).toFixed(6)),
-          lon: Number(parseFloat(item.lon).toFixed(6)),
-          address: formatAddress(item)
-        }));
-
-        if (nomPlaces.length > 0) {
-          setResults(nomPlaces);
-        } else {
-          setError('No locations found in Bhimavaram. Try another keyword.');
-        }
-      } else {
-        setError('Location search currently unavailable.');
-      }
-    } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        console.warn('Geocoding search error:', err);
-      }
-      setError('Search lookup failed. You can click anywhere on the map directly.');
-    } finally {
-      clearTimeout(timeoutId);
-      setSearching(false);
-    }
-  };
-
   const handleSelect = (place: SearchResult) => {
     map.flyTo([place.lat, place.lon], 16, { duration: 0.8 });
-    onSelect(place.lat, place.lon);
-    if (onAddressChange && place.address) {
-      onAddressChange(place.address, Date.now());
-    }
+    onSelect(place.lat, place.lon, place.address);
     setQuery(place.name);
     setIsOpen(false);
     setResults([]);
@@ -337,13 +246,137 @@ function LocationSearch({
     setError('');
   };
 
+  const handleSearch = async (e?: React.SyntheticEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const cleanQuery = query.trim();
+    if (!cleanQuery) return;
+
+    setSearching(true);
+    setError('');
+    setResults([]);
+    setIsOpen(true);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+    try {
+      // 1. Try Photon Geocoding with coordinate bias towards Andhra Pradesh / Bhimavaram
+      const photonUrl = new URL('https://photon.komoot.io/api/');
+      photonUrl.searchParams.set('q', cleanQuery);
+      photonUrl.searchParams.set('limit', '5');
+      photonUrl.searchParams.set('lat', String(BHIMAVARAM_DEFAULT[0]));
+      photonUrl.searchParams.set('lon', String(BHIMAVARAM_DEFAULT[1]));
+
+      const response = await fetch(photonUrl.toString(), { signal: controller.signal });
+      if (response.ok) {
+        const data = await response.json();
+        const places: SearchResult[] = (data.features || []).map((feature: any) => {
+          const p = feature.properties || {};
+          const coords = feature.geometry.coordinates;
+          const placeName = p.name || p.street || cleanQuery;
+
+          // Assemble clean address parts from Photon properties without hardcoded defaults
+          const addressParts = [
+            placeName !== p.street ? p.street : null,
+            p.housenumber,
+            p.suburb || p.district,
+            p.city || p.town || p.village,
+            p.county,
+            p.state || 'Andhra Pradesh',
+            p.postcode
+          ].filter(Boolean);
+
+          const uniqueParts = Array.from(new Set(addressParts));
+          const address = uniqueParts.length > 0
+            ? [placeName, ...uniqueParts.filter((part: string) => part !== placeName)].join(', ')
+            : `${placeName}, Andhra Pradesh`;
+
+          return {
+            name: placeName,
+            lat: Number(coords[1].toFixed(6)),
+            lon: Number(coords[0].toFixed(6)),
+            address
+          };
+        });
+
+        if (places.length === 1) {
+          handleSelect(places[0]);
+          clearTimeout(timeoutId);
+          return;
+        }
+
+        if (places.length > 1) {
+          setResults(places);
+          setSearching(false);
+          clearTimeout(timeoutId);
+          return;
+        }
+      }
+
+      // 2. Fallback to OpenStreetMap Nominatim search
+      try {
+        const nominatimUrl = new URL('https://nominatim.openstreetmap.org/search');
+        nominatimUrl.searchParams.set('format', 'jsonv2');
+        nominatimUrl.searchParams.set('q', cleanQuery);
+        nominatimUrl.searchParams.set('countrycodes', 'in');
+        nominatimUrl.searchParams.set('limit', '5');
+        nominatimUrl.searchParams.set('addressdetails', '1');
+
+        const nomRes = await fetch(nominatimUrl.toString(), { signal: controller.signal });
+        if (nomRes.ok && (nomRes.headers.get('content-type') || '').includes('json')) {
+          const nomData = await nomRes.json();
+          if (Array.isArray(nomData) && nomData.length > 0) {
+            const nomPlaces: SearchResult[] = nomData.map((item: any) => ({
+              name: item.name || item.display_name.split(',')[0],
+              lat: Number(parseFloat(item.lat).toFixed(6)),
+              lon: Number(parseFloat(item.lon).toFixed(6)),
+              address: formatAddress(item) || item.display_name
+            }));
+
+            if (nomPlaces.length === 1) {
+              handleSelect(nomPlaces[0]);
+              clearTimeout(timeoutId);
+              return;
+            }
+
+            if (nomPlaces.length > 1) {
+              setResults(nomPlaces);
+              setIsOpen(true);
+              clearTimeout(timeoutId);
+              return;
+            }
+          }
+        }
+      } catch (nomErr) {
+        // Nominatim network failure handled gracefully
+      }
+
+      // Both returned 0 results
+      setError(`No locations found for "${cleanQuery}". Please check the spelling or try another landmark.`);
+      setResults([]);
+      setIsOpen(true);
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        console.warn('Geocoding search error:', err);
+      }
+      setError(`Search lookup for "${cleanQuery}" was unavailable. You can click anywhere on the map directly.`);
+      setResults([]);
+      setIsOpen(true);
+    } finally {
+      clearTimeout(timeoutId);
+      setSearching(false);
+    }
+  };
+
   return (
     <div
       ref={searchBoxRef}
       className="absolute top-3 left-3 z-[500] w-[min(340px,calc(100%-88px))] pointer-events-auto"
     >
-      <form
-        onSubmit={handleSearch}
+      <div
         className="flex items-center gap-1.5 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/90 p-1.5 transition-all focus-within:ring-2 focus-within:ring-civic-500 focus-within:border-civic-500"
       >
         <Search className="w-4 h-4 text-slate-400 ml-2 shrink-0" />
@@ -352,7 +385,18 @@ function LocationSearch({
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
-            if (!e.target.value) setIsOpen(false);
+            if (!e.target.value) {
+              setIsOpen(false);
+              setResults([]);
+              setError('');
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              e.stopPropagation();
+              handleSearch();
+            }
           }}
           placeholder="Search street, area or landmark..."
           className="min-w-0 flex-1 outline-none text-xs text-slate-800 bg-transparent placeholder:text-slate-400"
@@ -369,9 +413,15 @@ function LocationSearch({
           </button>
         )}
         <button
-          type="submit"
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            handleSearch();
+          }}
           disabled={searching || !query.trim()}
           className="bg-civic-600 hover:bg-civic-700 disabled:opacity-50 text-white rounded-xl px-3 py-1.5 text-xs font-bold transition-all shadow-sm active:scale-95 shrink-0 flex items-center gap-1"
+          title="Find location"
         >
           {searching ? (
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -379,7 +429,7 @@ function LocationSearch({
             'Find'
           )}
         </button>
-      </form>
+      </div>
 
       {/* Results Dropdown */}
       {isOpen && (results.length > 0 || error) && (
@@ -642,8 +692,13 @@ export const MapPicker: React.FC<Props> = ({
 
         {/* Location Search Bar */}
         <LocationSearch
-          onSelect={onChange}
-          onAddressChange={onAddressChange}
+          onSelect={(lat, lon, addr) => {
+            prevGeocodedCoordsRef.current = [lat, lon];
+            onChange(lat, lon);
+            if (onAddressChangeRef.current && addr) {
+              onAddressChangeRef.current(addr, Date.now(), true);
+            }
+          }}
         />
 
         {/* Draggable Marker */}

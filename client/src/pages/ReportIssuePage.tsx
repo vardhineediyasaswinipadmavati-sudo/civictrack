@@ -251,7 +251,15 @@ export const ReportIssuePage: React.FC = () => {
               setLatitude(lat);
               setLongitude(lon);
             }}
-            onAddressChange={(detectedAddress, requestTimestamp) => {
+            onAddressChange={(detectedAddress, requestTimestamp, isExplicitUserAction) => {
+              if (isExplicitUserAction) {
+                // User explicitly searched/selected a place -> ALWAYS update address!
+                setIsAddressManuallyEdited(false);
+                userEditTimestampRef.current = 0;
+                setAddress(detectedAddress);
+                return;
+              }
+
               // Crucial Guard: Do NOT overwrite a manually edited address with a delayed geocoding response!
               if (
                 userEditTimestampRef.current > 0 &&
