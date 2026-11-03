@@ -454,6 +454,7 @@ router.get('/', authenticateToken, async (req, res) => {
           similarity_match_score: r.similarity_match_score,
           link_type: r.link_type,
           primary_image: primaryImg ? primaryImg.image_url : null,
+          evidence_image: primaryImg ? primaryImg.image_url : null,
           created_at: r.created_at
         };
       })
@@ -516,6 +517,8 @@ router.get('/:id', authenticateToken, async (req, res) => {
       similarity_match_score: reportDoc.similarity_match_score,
       link_type: reportDoc.link_type,
       created_at: reportDoc.created_at,
+      primary_image: images.length > 0 ? images[0].image_url : null,
+      evidence_image: images.length > 0 ? images[0].image_url : null,
       images: images.map((img) => ({
         id: img._id.toString(),
         image_url: img.image_url,

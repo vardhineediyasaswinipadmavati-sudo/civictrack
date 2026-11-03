@@ -322,8 +322,19 @@ export const CitizenDashboard: React.FC = () => {
                         <tr key={r.id} className="hover:bg-slate-50/80 transition-colors">
                           <td className="px-6 py-4 font-mono font-bold text-slate-900">{r.report_code}</td>
                           <td className="px-6 py-4">
-                            <div className="font-semibold text-slate-900 max-w-xs truncate">{r.title}</div>
-                            <div className="text-[11px] text-slate-500">{r.shared_category || r.category}</div>
+                            <div className="flex items-center gap-3">
+                              {(r.primary_image || r.evidence_image) && (
+                                <img
+                                  src={r.primary_image || r.evidence_image || ''}
+                                  alt="Report evidence thumbnail"
+                                  className="w-10 h-10 rounded-lg object-cover border border-slate-200 shrink-0"
+                                />
+                              )}
+                              <div>
+                                <div className="font-semibold text-slate-900 max-w-xs truncate">{r.title}</div>
+                                <div className="text-[11px] text-slate-500">{r.shared_category || r.category}</div>
+                              </div>
+                            </div>
                           </td>
                           <td className="px-6 py-4 max-w-xs truncate text-slate-600">{r.address}</td>
                           <td className="px-6 py-4">

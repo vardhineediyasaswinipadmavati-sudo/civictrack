@@ -303,6 +303,26 @@ export const IssueDetailPage: React.FC = () => {
                     "{report.description}"
                   </p>
 
+                  {/* Citizen's specific uploaded evidence photograph */}
+                  {report.evidence_image && (
+                    <div className="mt-2.5">
+                      <a
+                        href={report.evidence_image}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-block group relative rounded-xl overflow-hidden border border-slate-200 hover:border-civic-500 shadow-xs transition-all"
+                        title="Click to view full photograph"
+                      >
+                        <img
+                          src={report.evidence_image}
+                          alt={`Evidence submitted for ${report.report_code}`}
+                          className="w-32 h-24 object-cover group-hover:scale-105 transition-transform duration-200"
+                        />
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+                      </a>
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between pt-1 text-[11px] text-slate-500">
                     <span className="flex items-center gap-1">
                       <MapPin className="w-3 h-3 text-slate-400" /> {report.address}

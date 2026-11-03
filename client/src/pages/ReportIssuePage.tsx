@@ -15,7 +15,8 @@ import {
   ArrowRight,
   ArrowLeft,
   Sparkles,
-  Loader2
+  Loader2,
+  X
 } from 'lucide-react';
 
 export const ReportIssuePage: React.FC = () => {
@@ -78,35 +79,34 @@ export const ReportIssuePage: React.FC = () => {
     setImagePreviews((prev) => [...prev, ...previews]);
   };
 
+  const removeImage = (index: number) => {
+    setImageFiles((prev) => prev.filter((_, i) => i !== index));
+    setImagePreviews((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const executeSubmission = async (confirmedIssueId: string | number | null = null) => {
     setLoading(true);
     setError(null);
     try {
-      // 1. Upload any selected images
+      // 1. Upload any selected images - strictly preserve citizen-submitted photos
       const imageUrls: string[] = [];
       for (const file of imageFiles) {
         try {
           const res = await api.uploadImage(file);
-          imageUrls.push(res.imageUrl);
-        } catch (e) {
-          console.warn('Image upload error', e);
+          if (res && res.imageUrl) {
+            imageUrls.push(res.imageUrl);
+          } else {
+            throw new Error('Image upload succeeded but no image URL was returned.');
+          }
+        } catch (e: any) {
+          console.error('Image upload failed for file:', file.name, e);
+          throw new Error(
+            `Failed to upload evidence image "${file.name}": ${e?.message || 'Storage error'}. Submission stopped to prevent submitting without your photographic evidence.`
+          );
         }
       }
 
-      // If no image uploaded, provide a realistic contextual demo image based on category
-      if (imageUrls.length === 0) {
-        if (category.includes('Road') || category.includes('pothole')) {
-          imageUrls.push('https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?w=800&auto=format&fit=crop&q=80');
-        } else if (category.includes('light')) {
-          imageUrls.push('https://images.unsplash.com/photo-1509114397022-ed747cca3f65?w=800&auto=format&fit=crop&q=80');
-        } else if (category.includes('Water')) {
-          imageUrls.push('https://images.unsplash.com/photo-1527482797697-8795b05a13fe?w=800&auto=format&fit=crop&q=80');
-        } else {
-          imageUrls.push('https://images.unsplash.com/photo-1584463699047-926c04cf037f?w=800&auto=format&fit=crop&q=80');
-        }
-      }
-
-      // 2. Submit report
+      // 2. Submit report with the citizen's actual uploaded images (never inject unrelated stock photos)
       const res = await api.submitReport({
         title: title.trim(),
         category,
@@ -124,6 +124,7 @@ export const ReportIssuePage: React.FC = () => {
       navigate(`/issues/${res.sharedIssueId}`);
     } catch (err: any) {
       setError(err.message || 'Submission failed.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } finally {
       setLoading(false);
       setShowDuplicateModal(false);
@@ -404,14 +405,23 @@ export const ReportIssuePage: React.FC = () => {
 
           {/* Previews */}
           {imagePreviews.length > 0 && (
-            <div className="mt-3 flex gap-2 overflow-x-auto pb-2">
+            <div className="mt-3 flex gap-2.5 overflow-x-auto pb-2">
               {imagePreviews.map((src, i) => (
-                <img
-                  key={i}
-                  src={src}
-                  alt={`Preview ${i}`}
-                  className="w-20 h-20 object-cover rounded-xl border border-slate-200 shadow-sm shrink-0"
-                />
+                <div key={i} className="relative group shrink-0">
+                  <img
+                    src={src}
+                    alt={`Preview ${i + 1}`}
+                    className="w-20 h-20 object-cover rounded-xl border border-slate-200 shadow-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeImage(i)}
+                    className="absolute -top-1.5 -right-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-full p-0.5 shadow-md transition-colors"
+                    title="Remove this image"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               ))}
             </div>
           )}
