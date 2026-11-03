@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
+import { MapTileLayer } from '../components/MapTileLayer';
 import L from 'leaflet';
 import { api } from '../services/api';
 import { InfrastructureAsset, SharedIssue } from '../types';
@@ -396,10 +397,7 @@ export const HealthMapPage: React.FC = () => {
             className="w-full h-full"
             style={{ touchAction: 'pan-x pan-y' }}
           >
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
+            <MapTileLayer />
 
             {/* Custom Interactive Controls & Safe Geolocation Controller */}
             <MapControlsController
