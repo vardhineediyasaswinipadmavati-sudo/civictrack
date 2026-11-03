@@ -1,7 +1,22 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  useMap,
+  useMapEvents
+} from 'react-leaflet';
 import L from 'leaflet';
-import { MapPin, Plus, Minus, RotateCcw, Crosshair } from 'lucide-react';
+import {
+  MapPin,
+  Plus,
+  Minus,
+  RotateCcw,
+  Crosshair,
+  Search,
+  Loader2,
+  X
+} from 'lucide-react';
 
 const BHIMAVARAM_DEFAULT: [number, number] = [16.5449, 81.5212];
 
@@ -32,7 +47,39 @@ interface Props {
   latitude: number;
   longitude: number;
   onChange: (lat: number, lon: number) => void;
+  onAddressChange?: (address: string) => void;
+  onGeocodingLoading?: (loading: boolean) => void;
   height?: string;
+}
+
+interface SearchResult {
+  name: string;
+  lat: number;
+  lon: number;
+  address: string;
+}
+
+// Format reverse-geocoded address into clean municipal location string
+function formatAddress(data: any): string {
+  if (!data) return '';
+  const a = data.address;
+  if (a) {
+    const parts = [
+      a.building || a.amenity || a.shop || a.office,
+      a.house_number,
+      a.road || a.pedestrian || a.path || a.street,
+      a.neighbourhood || a.suburb || a.residential,
+      a.city_district || a.ward,
+      a.city || a.town || a.village || 'Bhimavaram',
+      a.postcode,
+      a.state || 'Andhra Pradesh'
+    ].filter(Boolean);
+
+    if (parts.length >= 2) {
+      return parts.join(', ');
+    }
+  }
+  return data.display_name || '';
 }
 
 // Draggable & clickable marker component
@@ -45,14 +92,14 @@ function DraggableLocationMarker({
 }) {
   const markerRef = useRef<L.Marker>(null);
 
-  // Click map to reposition
+  // Click anywhere on map to reposition pin
   useMapEvents({
     click(e) {
       onChange(Number(e.latlng.lat.toFixed(6)), Number(e.latlng.lng.toFixed(6)));
     }
   });
 
-  // Drag marker to fine-tune position
+  // Drag pin to fine-tune exact location
   const eventHandlers = useMemo(
     () => ({
       dragend() {
@@ -77,7 +124,210 @@ function DraggableLocationMarker({
   );
 }
 
-// Map picker internal controls controller
+// Location search bar component inside the map canvas
+function LocationSearch({
+  onSelect,
+  onAddressChange
+}: {
+  onSelect: (lat: number, lon: number) => void;
+  onAddressChange?: (address: string) => void;
+}) {
+  const map = useMap();
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [error, setError] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+  const searchBoxRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSearch = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const cleanQuery = query.trim();
+    if (!cleanQuery) return;
+
+    setSearching(true);
+    setError('');
+    setResults([]);
+    setIsOpen(true);
+
+    try {
+      // 1. Try Photon Geocoding with Bhimavaram coordinate bias
+      const photonUrl = new URL('https://photon.komoot.io/api/');
+      photonUrl.searchParams.set('q', cleanQuery);
+      photonUrl.searchParams.set('limit', '5');
+      photonUrl.searchParams.set('lat', String(BHIMAVARAM_DEFAULT[0]));
+      photonUrl.searchParams.set('lon', String(BHIMAVARAM_DEFAULT[1]));
+
+      const response = await fetch(photonUrl.toString());
+      if (response.ok) {
+        const data = await response.json();
+        const places: SearchResult[] = (data.features || []).map((feature: any) => {
+          const p = feature.properties || {};
+          const coords = feature.geometry.coordinates;
+          const address = [
+            p.housenumber,
+            p.street,
+            p.suburb || p.district,
+            p.city || p.town || p.village || 'Bhimavaram',
+            p.state || 'Andhra Pradesh'
+          ].filter(Boolean).join(', ');
+
+          return {
+            name: p.name || p.street || address || 'Search location',
+            lat: Number(coords[1].toFixed(6)),
+            lon: Number(coords[0].toFixed(6)),
+            address: address || p.name || ''
+          };
+        });
+
+        if (places.length > 0) {
+          setResults(places);
+          setSearching(false);
+          return;
+        }
+      }
+
+      // 2. Fallback to OpenStreetMap Nominatim search
+      const nominatimUrl = new URL('https://nominatim.openstreetmap.org/search');
+      nominatimUrl.searchParams.set('format', 'jsonv2');
+      nominatimUrl.searchParams.set('q', `${cleanQuery}, Bhimavaram`);
+      nominatimUrl.searchParams.set('limit', '5');
+      nominatimUrl.searchParams.set('addressdetails', '1');
+
+      const nomRes = await fetch(nominatimUrl.toString());
+      if (nomRes.ok) {
+        const nomData = await nomRes.json();
+        const nomPlaces: SearchResult[] = (nomData || []).map((item: any) => ({
+          name: item.name || item.display_name.split(',')[0],
+          lat: Number(parseFloat(item.lat).toFixed(6)),
+          lon: Number(parseFloat(item.lon).toFixed(6)),
+          address: formatAddress(item)
+        }));
+
+        if (nomPlaces.length > 0) {
+          setResults(nomPlaces);
+        } else {
+          setError('No locations found in Bhimavaram. Try another keyword.');
+        }
+      } else {
+        setError('Location search currently unavailable.');
+      }
+    } catch (err) {
+      console.warn('Geocoding search error:', err);
+      setError('Search lookup failed. You can click anywhere on the map directly.');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleSelect = (place: SearchResult) => {
+    map.flyTo([place.lat, place.lon], 16, { duration: 0.8 });
+    onSelect(place.lat, place.lon);
+    if (onAddressChange && place.address) {
+      onAddressChange(place.address);
+    }
+    setQuery(place.name);
+    setIsOpen(false);
+    setResults([]);
+    setError('');
+  };
+
+  const handleClear = () => {
+    setQuery('');
+    setResults([]);
+    setIsOpen(false);
+    setError('');
+  };
+
+  return (
+    <div
+      ref={searchBoxRef}
+      className="absolute top-3 left-3 z-[500] w-[min(340px,calc(100%-88px))] pointer-events-auto"
+    >
+      <form
+        onSubmit={handleSearch}
+        className="flex items-center gap-1.5 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/90 p-1.5 transition-all focus-within:ring-2 focus-within:ring-civic-500 focus-within:border-civic-500"
+      >
+        <Search className="w-4 h-4 text-slate-400 ml-2 shrink-0" />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            if (!e.target.value) setIsOpen(false);
+          }}
+          placeholder="Search street, area or landmark..."
+          className="min-w-0 flex-1 outline-none text-xs text-slate-800 bg-transparent placeholder:text-slate-400"
+          aria-label="Search landmark or area"
+        />
+        {query && (
+          <button
+            type="button"
+            onClick={handleClear}
+            className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors"
+            title="Clear search"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+        <button
+          type="submit"
+          disabled={searching || !query.trim()}
+          className="bg-civic-600 hover:bg-civic-700 disabled:opacity-50 text-white rounded-xl px-3 py-1.5 text-xs font-bold transition-all shadow-sm active:scale-95 shrink-0 flex items-center gap-1"
+        >
+          {searching ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            'Find'
+          )}
+        </button>
+      </form>
+
+      {/* Results Dropdown */}
+      {isOpen && (results.length > 0 || error) && (
+        <div className="mt-1.5 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden max-h-60 overflow-y-auto">
+          {results.map((place, index) => (
+            <button
+              key={`${place.lat}-${place.lon}-${index}`}
+              type="button"
+              onClick={() => handleSelect(place)}
+              className="w-full text-left px-3.5 py-2.5 hover:bg-civic-50/70 border-b last:border-0 border-slate-100 flex items-start gap-2.5 transition-colors group"
+            >
+              <MapPin className="w-3.5 h-3.5 text-civic-600 shrink-0 mt-0.5 group-hover:scale-110 transition-transform" />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-slate-800 truncate">
+                  {place.name}
+                </p>
+                <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                  {place.address}
+                </p>
+              </div>
+            </button>
+          ))}
+
+          {error && (
+            <div className="p-3 text-[11px] text-amber-700 bg-amber-50/60 text-center">
+              {error}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Map picker internal controls toolbar
 function PickerControlsController({
   position,
   onChange
@@ -133,13 +383,13 @@ function PickerControlsController({
   };
 
   return (
-    <div className="absolute top-3 right-3 z-[400] flex flex-col gap-1 bg-white/95 backdrop-blur-md p-1 rounded-xl shadow-lg border border-slate-200">
+    <div className="absolute top-3 right-3 z-[400] flex flex-col gap-1 bg-white/95 backdrop-blur-md p-1 rounded-2xl shadow-xl border border-slate-200">
       <button
         type="button"
         onClick={handleZoomIn}
         title="Zoom In"
         aria-label="Zoom In"
-        className="w-7 h-7 flex items-center justify-center text-slate-700 hover:text-civic-700 hover:bg-slate-100 rounded-lg transition-colors active:scale-95 font-bold"
+        className="w-7 h-7 flex items-center justify-center text-slate-700 hover:text-civic-700 hover:bg-slate-100 rounded-xl transition-colors active:scale-95 font-bold"
       >
         <Plus className="w-3.5 h-3.5" />
       </button>
@@ -148,7 +398,7 @@ function PickerControlsController({
         onClick={handleZoomOut}
         title="Zoom Out"
         aria-label="Zoom Out"
-        className="w-7 h-7 flex items-center justify-center text-slate-700 hover:text-civic-700 hover:bg-slate-100 rounded-lg transition-colors active:scale-95 font-bold"
+        className="w-7 h-7 flex items-center justify-center text-slate-700 hover:text-civic-700 hover:bg-slate-100 rounded-xl transition-colors active:scale-95 font-bold"
       >
         <Minus className="w-3.5 h-3.5" />
       </button>
@@ -158,7 +408,7 @@ function PickerControlsController({
         onClick={handleRecenter}
         title="Recenter to Bhimavaram"
         aria-label="Recenter to Bhimavaram"
-        className="w-7 h-7 flex items-center justify-center text-slate-700 hover:text-civic-700 hover:bg-slate-100 rounded-lg transition-colors active:scale-95"
+        className="w-7 h-7 flex items-center justify-center text-slate-700 hover:text-civic-700 hover:bg-slate-100 rounded-xl transition-colors active:scale-95"
       >
         <RotateCcw className="w-3.5 h-3.5" />
       </button>
@@ -167,7 +417,7 @@ function PickerControlsController({
         onClick={handleLocateMe}
         title="Pin My Current Location"
         aria-label="Pin My Current Location"
-        className={`w-7 h-7 flex items-center justify-center rounded-lg transition-colors active:scale-95 ${
+        className={`w-7 h-7 flex items-center justify-center rounded-xl transition-colors active:scale-95 ${
           locating ? 'text-amber-600 bg-amber-50 animate-pulse' : 'text-slate-700 hover:text-civic-700 hover:bg-slate-100'
         }`}
       >
@@ -181,12 +431,59 @@ export const MapPicker: React.FC<Props> = ({
   latitude,
   longitude,
   onChange,
+  onAddressChange,
+  onGeocodingLoading,
   height = '300px'
 }) => {
+  const [detecting, setDetecting] = useState(false);
+
   const position: [number, number] = [
     typeof latitude === 'number' && !isNaN(latitude) && latitude !== 0 ? latitude : BHIMAVARAM_DEFAULT[0],
     typeof longitude === 'number' && !isNaN(longitude) && longitude !== 0 ? longitude : BHIMAVARAM_DEFAULT[1]
   ];
+
+  // Automatic reverse geocoding with debounce whenever marker moves
+  useEffect(() => {
+    if (!onAddressChange) return;
+
+    const controller = new AbortController();
+    setDetecting(true);
+    if (onGeocodingLoading) onGeocodingLoading(true);
+
+    const debounceTimer = setTimeout(async () => {
+      try {
+        const url = new URL('https://nominatim.openstreetmap.org/reverse');
+        url.searchParams.set('format', 'jsonv2');
+        url.searchParams.set('lat', String(position[0]));
+        url.searchParams.set('lon', String(position[1]));
+        url.searchParams.set('addressdetails', '1');
+
+        const response = await fetch(url.toString(), {
+          signal: controller.signal
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const detectedAddress = formatAddress(data);
+          if (detectedAddress) {
+            onAddressChange(detectedAddress);
+          }
+        }
+      } catch (err: any) {
+        if (err.name !== 'AbortError') {
+          console.warn('Reverse geocoding error:', err.message);
+        }
+      } finally {
+        setDetecting(false);
+        if (onGeocodingLoading) onGeocodingLoading(false);
+      }
+    }, 600);
+
+    return () => {
+      clearTimeout(debounceTimer);
+      controller.abort();
+    };
+  }, [position[0], position[1], onAddressChange, onGeocodingLoading]);
 
   return (
     <div
@@ -214,14 +511,38 @@ export const MapPicker: React.FC<Props> = ({
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        <DraggableLocationMarker position={position} onChange={onChange} />
-        <PickerControlsController position={position} onChange={onChange} />
+
+        {/* Location Search Bar */}
+        <LocationSearch
+          onSelect={onChange}
+          onAddressChange={onAddressChange}
+        />
+
+        {/* Draggable Marker */}
+        <DraggableLocationMarker
+          position={position}
+          onChange={onChange}
+        />
+
+        {/* Zoom, Recenter & GPS Controls */}
+        <PickerControlsController
+          position={position}
+          onChange={onChange}
+        />
       </MapContainer>
 
-      {/* Instructional helper badge at bottom */}
-      <div className="absolute bottom-2.5 left-2.5 z-[400] bg-white/95 backdrop-blur px-3 py-1.5 rounded-xl shadow-md border border-slate-200 text-[11px] font-medium text-slate-700 flex items-center gap-1.5 pointer-events-none">
+      {/* Coordinate & Status Badge at bottom */}
+      <div className="absolute bottom-2.5 left-2.5 z-[400] bg-white/95 backdrop-blur px-3 py-1.5 rounded-xl shadow-md border border-slate-200 text-[11px] font-medium text-slate-700 flex items-center gap-2 pointer-events-none">
         <MapPin className="w-3.5 h-3.5 text-civic-600 shrink-0" />
-        <span>Click or drag pin to position ({position[0].toFixed(4)}, {position[1].toFixed(4)})</span>
+        <span>
+          Pin: {position[0].toFixed(4)}°N, {position[1].toFixed(4)}°E
+        </span>
+        {detecting && (
+          <span className="flex items-center gap-1 text-[10px] text-civic-600 font-semibold border-l border-slate-200 pl-2">
+            <Loader2 className="w-3 h-3 animate-spin text-civic-600" />
+            Detecting...
+          </span>
+        )}
       </div>
     </div>
   );

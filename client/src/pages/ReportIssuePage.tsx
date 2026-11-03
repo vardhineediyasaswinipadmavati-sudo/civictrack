@@ -14,7 +14,8 @@ import {
   AlertCircle,
   ArrowRight,
   ArrowLeft,
-  Sparkles
+  Sparkles,
+  Loader2
 } from 'lucide-react';
 
 export const ReportIssuePage: React.FC = () => {
@@ -29,6 +30,7 @@ export const ReportIssuePage: React.FC = () => {
   const [latitude, setLatitude] = useState(16.5449);
   const [longitude, setLongitude] = useState(81.5212);
   const [address, setAddress] = useState('Main Road, Near Town Railway Station, Bhimavaram, Andhra Pradesh');
+  const [isGeocoding, setIsGeocoding] = useState(false);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
 
@@ -238,13 +240,27 @@ export const ReportIssuePage: React.FC = () => {
               setLatitude(lat);
               setLongitude(lon);
             }}
-            height="260px"
+            onAddressChange={(detectedAddress) => {
+              if (detectedAddress) {
+                setAddress(detectedAddress);
+              }
+            }}
+            onGeocodingLoading={setIsGeocoding}
+            height="290px"
           />
 
           <div>
-            <label className="block font-semibold text-slate-600 mb-1">
-              Street Address / Landmark Details
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block font-semibold text-slate-600">
+                Street Address / Landmark Details <span className="text-red-500">*</span>
+              </label>
+              {isGeocoding && (
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-civic-700 bg-civic-50 px-2 py-0.5 rounded-full border border-civic-200 animate-pulse">
+                  <Loader2 className="w-3 h-3 animate-spin text-civic-600" />
+                  Detecting address...
+                </span>
+              )}
+            </div>
             <input
               type="text"
               required
