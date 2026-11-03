@@ -34,6 +34,30 @@ function getDepartmentCodeForCategory(category) {
   return 'ROADS';
 }
 
+// Helper to match asset category flexibly across naming variations
+function getAssetCategoryQuery(category) {
+  const cat = (category || '').toLowerCase();
+  if (cat.includes('road') || cat.includes('pothole')) {
+    return { category: { $regex: /road|pothole/i } };
+  }
+  if (cat.includes('light') || cat.includes('electr')) {
+    return { category: { $regex: /light|electr/i } };
+  }
+  if (cat.includes('drain') || cat.includes('sewag')) {
+    return { category: { $regex: /drain|sewag/i } };
+  }
+  if (cat.includes('water')) {
+    return { category: { $regex: /water/i } };
+  }
+  if (cat.includes('build') || cat.includes('facil') || cat.includes('structur')) {
+    return { category: { $regex: /build|facil|structur/i } };
+  }
+  if (cat.includes('garb') || cat.includes('sanit') || cat.includes('waste')) {
+    return { category: { $regex: /garb|sanit|waste/i } };
+  }
+  return { category: { $regex: new RegExp(category.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') } };
+}
+
 // 1. Check for duplicates before submitting (Feature 1B: Existing Issue Suggestion Screen)
 router.post('/check-duplicate', authenticateToken, async (req, res) => {
   try {
@@ -209,7 +233,7 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 
     // SCENARIO 2: Create a brand new Shared Civic Issue
-    const allAssets = await InfrastructureAsset.find({ category });
+    const allAssets = await InfrastructureAsset.find(getAssetCategoryQuery(category));
     let matchedAsset = null;
     let minDistance = 150; // Within 150 meters
 

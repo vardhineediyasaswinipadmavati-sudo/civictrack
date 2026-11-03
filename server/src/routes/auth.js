@@ -651,8 +651,17 @@ router.get('/users', authenticateToken, requireRole('admin'), async (req, res) =
   try {
     const { role } = req.query;
     const filter = {};
-    if (role) {
-      filter.role = role === 'staff' ? 'department_staff' : role;
+    if (role === 'all') {
+      // Explicitly requested all users
+    } else if (role === 'admin') {
+      filter.role = 'admin';
+    } else if (role === 'staff' || role === 'department_staff') {
+      filter.role = 'department_staff';
+    } else if (role === 'citizen') {
+      filter.role = 'citizen';
+    } else {
+      // Default / 'municipal': Strictly filter to authorized municipal personnel (Admin & Department Staff)
+      filter.role = { $in: ['admin', 'department_staff'] };
     }
 
     const users = await User.find(filter)

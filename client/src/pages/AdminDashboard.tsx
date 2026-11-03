@@ -409,7 +409,7 @@ export const AdminDashboard: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <h2 className="text-base font-bold text-slate-900">Municipal Personnel & Operations Directory</h2>
                   <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[11px] font-semibold border border-slate-200">
-                    {municipalUsers.length} Active Officers
+                    {municipalUsers.filter((u: any) => u.role === 'admin' || u.role === 'department_staff' || u.role === 'staff').length} Active Officers
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
@@ -425,7 +425,7 @@ export const AdminDashboard: React.FC = () => {
               </button>
             </div>
 
-            {municipalUsers.length === 0 ? (
+            {municipalUsers.filter((u: any) => u.role === 'admin' || u.role === 'department_staff' || u.role === 'staff').length === 0 ? (
               <div className="p-8 text-center text-slate-400 text-xs">
                 No municipal personnel records found. Use the button above to provision new staff or admin accounts.
               </div>
@@ -442,7 +442,9 @@ export const AdminDashboard: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
-                    {municipalUsers.map((u: any) => (
+                    {municipalUsers
+                      .filter((u: any) => u.role === 'admin' || u.role === 'department_staff' || u.role === 'staff')
+                      .map((u: any) => (
                       <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
                         <td className="py-3.5 px-6 font-bold text-slate-900 flex items-center gap-2">
                           <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${
@@ -467,8 +469,10 @@ export const AdminDashboard: React.FC = () => {
                             <span className="font-semibold text-slate-800">
                               {u.department_name} {u.department_code ? `(${u.department_code})` : ''}
                             </span>
+                          ) : u.role === 'admin' ? (
+                            <span className="text-slate-600 font-medium">Municipal Oversight (All)</span>
                           ) : (
-                            <span className="text-slate-400 italic">Municipal Oversight (All)</span>
+                            <span className="text-amber-600 italic">Unassigned</span>
                           )}
                         </td>
                         <td className="py-3.5 px-6">

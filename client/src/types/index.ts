@@ -40,6 +40,10 @@ export interface InfrastructureAsset {
   risk_score: number;
   risk_level: RiskLevel;
   risk_reasons: string[];
+  department_id?: string | number | null;
+  department_name?: string | null;
+  department_code?: string | null;
+  is_demo?: boolean;
   total_citizen_reports?: number;
   unique_incidents_count?: number;
   repair_attempts_count?: number;

@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { connectMongo, disconnectMongo } from './connection.js';
+import { seedDemoInfrastructureAssets } from './demoAssets.js';
 import {
   Department,
   User,
@@ -555,6 +556,8 @@ export async function seedMongoDatabase() {
       is_read: false
     }
   ]);
+
+  await seedDemoInfrastructureAssets();
 
   console.log('=== MongoDB Seeding Completed Successfully ===');
 }

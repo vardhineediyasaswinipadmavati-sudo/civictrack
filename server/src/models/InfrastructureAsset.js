@@ -66,6 +66,17 @@ const infrastructureAssetSchema = new mongoose.Schema(
       type: [String],
       default: []
     },
+    department_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Department',
+      default: null,
+      index: true
+    },
+    is_demo: {
+      type: Boolean,
+      default: false,
+      index: true
+    },
     legacy_id: {
       type: Number,
       index: true

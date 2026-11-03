@@ -84,7 +84,7 @@ export const api = {
     return handleResponse(res);
   },
 
-  async getMunicipalUsers(role?: string): Promise<User[]> {
+  async getMunicipalUsers(role: string = 'municipal'): Promise<User[]> {
     const query = role ? `?role=${encodeURIComponent(role)}` : '';
     const res = await fetch(`${API_BASE}/auth/users${query}`, {
       headers: getAuthHeaders()

@@ -37,11 +37,20 @@ export const InfrastructureListPage: React.FC = () => {
   }, []);
 
   const filtered = assets.filter((a) => {
-    const matchesSearch = !search ||
-      a.name.toLowerCase().includes(search.toLowerCase()) ||
-      a.asset_code.toLowerCase().includes(search.toLowerCase()) ||
-      a.address.toLowerCase().includes(search.toLowerCase());
-    const matchesCat = !categoryFilter || a.category === categoryFilter;
+    const q = search.toLowerCase().trim();
+    const matchesSearch = !q ||
+      a.name.toLowerCase().includes(q) ||
+      a.asset_code.toLowerCase().includes(q) ||
+      a.address.toLowerCase().includes(q) ||
+      (a.category && a.category.toLowerCase().includes(q)) ||
+      (a.department_name && a.department_name.toLowerCase().includes(q));
+
+    let matchesCat = true;
+    if (categoryFilter) {
+      matchesCat = a.category === categoryFilter ||
+        (categoryFilter.startsWith('Streetlights') && (a.category?.startsWith('Streetlights') || false)) ||
+        (categoryFilter.startsWith('Water') && (a.category?.startsWith('Water') || false));
+    }
     const matchesHealth = !healthFilter || a.current_health_status === healthFilter;
     return matchesSearch && matchesCat && matchesHealth;
   });
@@ -51,9 +60,14 @@ export const InfrastructureListPage: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
-            Infrastructure Asset Registry
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+              Infrastructure Asset Registry
+            </h1>
+            <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs font-bold border border-slate-200">
+              {assets.length} Monitored
+            </span>
+          </div>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
             Monitored municipal assets with failure histories, recurrence cycles, and rule-based risk ratings.
           </p>
@@ -73,7 +87,7 @@ export const InfrastructureListPage: React.FC = () => {
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
           <input
             type="text"
-            placeholder="Search by asset code, road name, address..."
+            placeholder="Search by asset code, road name, address, category..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-1 focus:ring-civic-500"
@@ -86,11 +100,13 @@ export const InfrastructureListPage: React.FC = () => {
           className="px-3 py-2 rounded-xl border border-slate-200 text-xs bg-white text-slate-700"
         >
           <option value="">All Categories</option>
-          <option value="Roads and potholes">Roads and potholes</option>
+          <option value="Roads and potholes">Roads and Potholes</option>
           <option value="Streetlights and electrical infrastructure">Streetlights & Electrical</option>
           <option value="Water supply and leakage">Water Supply</option>
           <option value="Drainage and sewage">Drainage & Sewage</option>
-          <option value="Public buildings and facilities">Facilities</option>
+          <option value="Garbage and sanitation">Garbage & Sanitation</option>
+          <option value="Public buildings and facilities">Public Buildings & Facilities</option>
+          <option value="Parks and public spaces">Parks & Public Spaces</option>
         </select>
 
         <select
@@ -104,14 +120,32 @@ export const InfrastructureListPage: React.FC = () => {
           <option value="warning">Repeated Incidents (Warning)</option>
           <option value="critical">High Recurring Risk (Critical)</option>
         </select>
+
+        {(search || categoryFilter || healthFilter) && (
+          <button
+            onClick={() => { setSearch(''); setCategoryFilter(''); setHealthFilter(''); }}
+            className="text-xs text-slate-500 hover:text-slate-800 font-semibold px-2 py-1"
+          >
+            Clear
+          </button>
+        )}
       </div>
 
       {/* Assets Grid */}
       {loading ? (
         <div className="p-12 text-center text-xs text-slate-500">Loading infrastructure registry...</div>
       ) : filtered.length === 0 ? (
-        <div className="p-12 text-center text-xs text-slate-500 bg-white rounded-2xl border border-slate-200">
-          No infrastructure assets matched your filters.
+        <div className="p-12 text-center text-xs text-slate-500 bg-white rounded-2xl border border-slate-200 space-y-3">
+          <p className="text-sm font-semibold text-slate-700">No infrastructure assets matched your filters.</p>
+          <p className="text-slate-400">Try adjusting your search terms, category selection, or health status filter.</p>
+          {(search || categoryFilter || healthFilter) && (
+            <button
+              onClick={() => { setSearch(''); setCategoryFilter(''); setHealthFilter(''); }}
+              className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold"
+            >
+              Reset all filters
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -122,9 +156,16 @@ export const InfrastructureListPage: React.FC = () => {
             >
               <div>
                 <div className="flex items-center justify-between gap-2 mb-2">
-                  <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-800">
-                    {asset.asset_code}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-800">
+                      {asset.asset_code}
+                    </span>
+                    {asset.is_demo && (
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-200">
+                        Demo
+                      </span>
+                    )}
+                  </div>
                   <RiskBadge level={asset.risk_level} score={asset.risk_score} />
                 </div>
 

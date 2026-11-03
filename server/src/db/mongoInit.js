@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { Department, User } from '../models/index.js';
+import { seedDemoInfrastructureAssets } from './demoAssets.js';
 
 export const DEFAULT_DEPARTMENTS = [
   { name: 'Roads and Infrastructure', code: 'ROADS', contact_email: 'roads@civictrack.org', sla_hours: 48 },
@@ -98,6 +99,13 @@ export async function initDefaultData() {
       ]);
       console.log('✓ Provisioned evaluation demo accounts for evaluation');
     }
+  }
+
+  // 3. Seed demonstration infrastructure assets if collection is empty
+  try {
+    await seedDemoInfrastructureAssets();
+  } catch (err) {
+    console.error('Failed to seed demo infrastructure assets during initialization:', err.message);
   }
 }
 

@@ -13,20 +13,31 @@ import {
 } from '../models/index.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 import { calculateInfrastructureRisk } from '../utils/riskPredictor.js';
+import { seedDemoInfrastructureAssets } from '../db/demoAssets.js';
 
 const router = express.Router();
 
 // Helper to resolve asset by ObjectId or legacy_id
 async function findAsset(idOrLegacy) {
   if (mongoose.Types.ObjectId.isValid(idOrLegacy)) {
-    return InfrastructureAsset.findById(idOrLegacy);
+    return InfrastructureAsset.findById(idOrLegacy).populate('department_id', 'name code');
   }
-  return InfrastructureAsset.findOne({ legacy_id: Number(idOrLegacy) });
+  return InfrastructureAsset.findOne({ legacy_id: Number(idOrLegacy) }).populate('department_id', 'name code');
 }
 
 // 1. List all infrastructure assets
 router.get('/', async (req, res) => {
   try {
+    // If the database has 0 assets, auto-seed realistic Bhimavaram demonstration assets
+    const totalAssets = await InfrastructureAsset.countDocuments();
+    if (totalAssets === 0) {
+      try {
+        await seedDemoInfrastructureAssets();
+      } catch (seedErr) {
+        console.warn('Auto-seed demo assets warning:', seedErr.message);
+      }
+    }
+
     const { category, health_status, risk_level, search } = req.query;
     const filter = {};
 
@@ -39,11 +50,14 @@ router.get('/', async (req, res) => {
       filter.$or = [
         { name: reg },
         { asset_code: reg },
-        { address: reg }
+        { address: reg },
+        { category: reg }
       ];
     }
 
-    const assets = await InfrastructureAsset.find(filter).sort({ risk_score: -1, name: 1 });
+    const assets = await InfrastructureAsset.find(filter)
+      .populate('department_id', 'name code')
+      .sort({ risk_score: -1, name: 1 });
 
     const formatted = await Promise.all(
       assets.map(async (a) => {
@@ -56,10 +70,14 @@ router.get('/', async (req, res) => {
 
         const totalReports = await CitizenReport.countDocuments({ shared_issue_id: { $in: linkedIssues } });
         const lastRepair = repairs.length > 0 ? repairs[0].completed_at : null;
+        const dept = a.department_id;
 
         return {
           ...a.toJSON(),
           id: a._id.toString(),
+          department_name: dept && dept.name ? dept.name : null,
+          department_code: dept && dept.code ? dept.code : null,
+          is_demo: !!a.is_demo,
           total_citizen_reports: totalReports,
           unique_incidents_count: incidentsCount,
           repair_attempts_count: repairs.length,
