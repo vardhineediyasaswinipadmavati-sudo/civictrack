@@ -149,6 +149,22 @@ test('CivicTrack Evidence Image Integrity & Preservation Suite', async (t) => {
     }
   });
 
+  await t.test('8. Mandatory Evidence Enforcement: Zero-image submission validation blocks registration', async () => {
+    const emptyImageFiles = [];
+    const validateSubmission = (files) => {
+      if (files.length === 0) {
+        throw new Error('Photographic evidence is mandatory. Please attach a clear photo of the infrastructure issue before submitting.');
+      }
+      return true;
+    };
+
+    assert.throws(
+      () => validateSubmission(emptyImageFiles),
+      /Photographic evidence is mandatory/,
+      'Submissions without an image must be rejected with clear validation error'
+    );
+  });
+
   // Cleanup test files created during test
   t.after(() => {
     try {

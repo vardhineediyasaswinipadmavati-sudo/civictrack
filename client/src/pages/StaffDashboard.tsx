@@ -256,12 +256,23 @@ export const StaffDashboard: React.FC = () => {
                           <span className="bg-slate-100 px-2 py-0.5 rounded">{issue.issue_code}</span>
                         </td>
                         <td className="px-6 py-4">
-                          <Link to={`/issues/${issue.id}`} className="font-bold text-slate-900 hover:text-civic-600 block max-w-xs truncate">
-                            {issue.title}
-                          </Link>
-                          <span className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
-                            <MapPin className="w-3 h-3 text-slate-400" /> {issue.address}
-                          </span>
+                          <div className="flex items-center gap-3">
+                            {issue.primary_image && (
+                              <img
+                                src={issue.primary_image}
+                                alt="Work order evidence"
+                                className="w-10 h-10 rounded-lg object-cover border border-slate-200 shrink-0"
+                              />
+                            )}
+                            <div>
+                              <Link to={`/issues/${issue.id}`} className="font-bold text-slate-900 hover:text-civic-600 block max-w-xs truncate">
+                                {issue.title}
+                              </Link>
+                              <span className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
+                                <MapPin className="w-3 h-3 text-slate-400" /> {issue.address}
+                              </span>
+                            </div>
+                          </div>
                         </td>
                         <td className="px-6 py-4">
                           {issue.asset_code ? (

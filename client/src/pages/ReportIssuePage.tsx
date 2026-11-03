@@ -85,10 +85,18 @@ export const ReportIssuePage: React.FC = () => {
   };
 
   const executeSubmission = async (confirmedIssueId: string | number | null = null) => {
+    if (imageFiles.length === 0) {
+      setError('Photographic evidence is mandatory. Please attach a clear photo of the infrastructure issue before submitting.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      setLoading(false);
+      setShowDuplicateModal(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
-      // 1. Upload any selected images - strictly preserve citizen-submitted photos
+      // 1. Upload mandatory evidence images - strictly preserve citizen-submitted photos
       const imageUrls: string[] = [];
       for (const file of imageFiles) {
         try {
@@ -104,6 +112,10 @@ export const ReportIssuePage: React.FC = () => {
             `Failed to upload evidence image "${file.name}": ${e?.message || 'Storage error'}. Submission stopped to prevent submitting without your photographic evidence.`
           );
         }
+      }
+
+      if (imageUrls.length === 0) {
+        throw new Error('At least one evidence photograph must be successfully uploaded before registering a complaint.');
       }
 
       // 2. Submit report with the citizen's actual uploaded images (never inject unrelated stock photos)
@@ -135,6 +147,13 @@ export const ReportIssuePage: React.FC = () => {
     e.preventDefault();
     if (!title || !description) {
       setError('Please provide a title and detailed description.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    if (imageFiles.length === 0) {
+      setError('Photographic evidence is mandatory. Please attach a clear photo of the infrastructure issue before submitting.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
@@ -385,15 +404,22 @@ export const ReportIssuePage: React.FC = () => {
           </div>
         </div>
 
-        {/* Photograph Evidence Upload */}
+        {/* Photograph Evidence Upload (Mandatory) */}
         <div>
-          <label className="block font-bold text-slate-700 mb-1.5">
-            Photographic Evidence (Optional)
-          </label>
-          <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center hover:border-civic-400 transition-colors">
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="block font-bold text-slate-700">
+              Photographic Evidence <span className="text-red-500">*</span>
+            </label>
+            <span className="text-[11px] font-semibold text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full">
+              Mandatory
+            </span>
+          </div>
+          <div className={`border-2 border-dashed rounded-xl p-4 text-center transition-colors ${
+            imageFiles.length === 0 ? 'border-amber-300 bg-amber-50/20 hover:border-civic-400' : 'border-slate-200 hover:border-civic-400'
+          }`}>
             <Camera className="w-8 h-8 text-slate-400 mx-auto mb-1" />
-            <p className="text-xs text-slate-600 font-medium">Upload photos of the problem</p>
-            <p className="text-[10px] text-slate-400 mt-0.5">PNG, JPG, WebP up to 5MB</p>
+            <p className="text-xs text-slate-600 font-medium">Upload photo of the problem <span className="text-red-500 font-bold">*</span></p>
+            <p className="text-[10px] text-slate-400 mt-0.5">PNG, JPG, WebP up to 5MB (At least 1 photo required)</p>
             <input
               type="file"
               multiple
