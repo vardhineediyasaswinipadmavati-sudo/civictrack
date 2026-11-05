@@ -27,6 +27,8 @@ router.get('/overview', async (req, res) => {
       openIssuesCount,
       escalatedIssuesCount,
       resolvedIssuesCount,
+      approvedIssuesCount,
+      rejectedIssuesCount,
       highRiskCount,
       criticalHealthCount,
       categoryAgg
@@ -37,11 +39,13 @@ router.get('/overview', async (req, res) => {
       InfrastructureIncident.countDocuments({ recurrence_sequence: { $gt: 1 } }),
       RepairRecord.countDocuments(),
       SharedIssue.countDocuments({
-        status: { $in: ['Pending', 'Assigned', 'In Progress'] },
+        status: { $in: ['Pending', 'Assigned', 'In Progress', 'Rejected', 'Reopened'] },
         is_merged_into_id: null
       }),
       SharedIssue.countDocuments({ status: 'Escalated', is_merged_into_id: null }),
       SharedIssue.countDocuments({ status: 'Resolved', is_merged_into_id: null }),
+      SharedIssue.countDocuments({ status: 'Approved', is_merged_into_id: null }),
+      SharedIssue.countDocuments({ status: 'Rejected', is_merged_into_id: null }),
       InfrastructureAsset.countDocuments({ risk_level: { $in: ['High', 'Critical'] } }),
       InfrastructureAsset.countDocuments({ current_health_status: 'critical' }),
       SharedIssue.aggregate([
@@ -68,6 +72,8 @@ router.get('/overview', async (req, res) => {
       openIssues: openIssuesCount,
       escalatedIssues: escalatedIssuesCount,
       resolvedIssues: resolvedIssuesCount,
+      approvedIssues: approvedIssuesCount,
+      rejectedIssues: rejectedIssuesCount,
       highRiskAssets: highRiskCount,
       criticalAssets: criticalHealthCount,
       categoryBreakdown

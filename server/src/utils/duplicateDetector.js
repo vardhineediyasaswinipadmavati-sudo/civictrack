@@ -77,11 +77,11 @@ export function evaluateDuplicateMatch(newReport, existingIssue) {
   const descSim = calculateTextSimilarity(newReport.description, existingIssue.description);
   const textScore = Math.round(titleSim * 0.4 + descSim * 0.6);
 
-  // Status check: open issues are active duplicates; resolved issues within 14 days can be recurring
+  // Status check: open issues are active duplicates; resolved/approved issues within 14 days can be recurring
   let statusScore = 60;
-  if (['Pending', 'Assigned', 'In Progress', 'Escalated'].includes(existingIssue.status)) {
+  if (['Pending', 'Assigned', 'In Progress', 'Escalated', 'Rejected', 'Reopened'].includes(existingIssue.status)) {
     statusScore = 100;
-  } else if (existingIssue.status === 'Resolved') {
+  } else if (['Resolved', 'Approved'].includes(existingIssue.status)) {
     statusScore = 40;
   }
 

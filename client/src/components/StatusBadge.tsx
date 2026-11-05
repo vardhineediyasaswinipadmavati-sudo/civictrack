@@ -1,6 +1,6 @@
 import React from 'react';
 import { IssueStatus } from '../types';
-import { Clock, CheckCircle2, AlertTriangle, ArrowUpRight, RotateCcw, UserCheck } from 'lucide-react';
+import { Clock, CheckCircle2, ShieldCheck, XCircle, RotateCcw, UserCheck, ArrowUpRight } from 'lucide-react';
 
 interface Props {
   status: IssueStatus | string;
@@ -41,9 +41,23 @@ export const StatusBadge: React.FC<Props> = ({ status, size = 'md' }) => {
       );
     case 'Resolved':
       return (
-        <span className={`inline-flex items-center gap-1.5 font-medium rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/60 ${sizeClasses[size]}`}>
-          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-          Resolved
+        <span className={`inline-flex items-center gap-1.5 font-medium rounded-full bg-blue-50 text-blue-700 border border-blue-200/80 ${sizeClasses[size]}`}>
+          <CheckCircle2 className="w-3.5 h-3.5 text-blue-600" />
+          Resolved (Awaiting Approval)
+        </span>
+      );
+    case 'Approved':
+      return (
+        <span className={`inline-flex items-center gap-1.5 font-medium rounded-full bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-sm ${sizeClasses[size]}`}>
+          <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+          Approved (Verified Closure)
+        </span>
+      );
+    case 'Rejected':
+      return (
+        <span className={`inline-flex items-center gap-1.5 font-medium rounded-full bg-rose-50 text-rose-800 border border-rose-300 ${sizeClasses[size]}`}>
+          <XCircle className="w-3.5 h-3.5 text-rose-600" />
+          Rejected (Rework Required)
         </span>
       );
     case 'Reopened':

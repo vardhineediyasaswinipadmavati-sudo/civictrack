@@ -268,11 +268,11 @@ export async function computeDepartmentPerformance() {
 
     const [totalIssues, resolvedIssues, escalatedIssues, openIssues] = await Promise.all([
       SharedIssue.countDocuments({ department_id: deptId, is_merged_into_id: null }),
-      SharedIssue.countDocuments({ department_id: deptId, status: 'Resolved', is_merged_into_id: null }),
+      SharedIssue.countDocuments({ department_id: deptId, status: { $in: ['Resolved', 'Approved'] }, is_merged_into_id: null }),
       SharedIssue.countDocuments({ department_id: deptId, status: 'Escalated', is_merged_into_id: null }),
       SharedIssue.countDocuments({
         department_id: deptId,
-        status: { $in: ['Pending', 'Assigned', 'In Progress'] },
+        status: { $in: ['Pending', 'Assigned', 'In Progress', 'Rejected', 'Reopened'] },
         is_merged_into_id: null
       })
     ]);
@@ -280,7 +280,7 @@ export async function computeDepartmentPerformance() {
     // Average resolution time
     const resolvedList = await SharedIssue.find({
       department_id: deptId,
-      status: 'Resolved',
+      status: { $in: ['Resolved', 'Approved'] },
       resolved_at: { $ne: null }
     });
 

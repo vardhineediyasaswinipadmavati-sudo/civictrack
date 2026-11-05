@@ -46,7 +46,7 @@ const sharedIssueSchema = new mongoose.Schema(
     status: {
       type: String,
       required: true,
-      enum: ['Pending', 'Assigned', 'In Progress', 'Resolved', 'Reopened', 'Escalated'],
+      enum: ['Pending', 'Assigned', 'In Progress', 'Resolved', 'Approved', 'Rejected', 'Reopened', 'Escalated'],
       default: 'Pending',
       index: true
     },
@@ -115,6 +115,34 @@ const sharedIssueSchema = new mongoose.Schema(
     resolution_type: {
       type: String,
       enum: ['temporary', 'permanent', 'inspection_only', 'no_fault', null],
+      default: null
+    },
+    approved_at: {
+      type: Date,
+      default: null,
+      index: true
+    },
+    approved_by_user_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true
+    },
+    approval_notes: {
+      type: String,
+      default: null
+    },
+    rejected_at: {
+      type: Date,
+      default: null
+    },
+    rejected_by_user_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null
+    },
+    rejection_reason: {
+      type: String,
       default: null
     },
     is_merged_into_id: {

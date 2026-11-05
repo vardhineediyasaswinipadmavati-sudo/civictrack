@@ -311,10 +311,10 @@ router.get('/:id', async (req, res) => {
       mtbfDays = Math.round(totalDays / (sortedIncidents.length - 1));
     }
 
-    // Active issues currently open
+    // Active issues currently open (neither staff-resolved nor admin-approved)
     const activeIssues = await SharedIssue.find({
       infrastructure_id: assetId,
-      status: { $ne: 'Resolved' }
+      status: { $nin: ['Resolved', 'Approved'] }
     });
 
     const formattedActiveIssues = await Promise.all(
@@ -524,7 +524,7 @@ async function handleRecordRepair(req, res) {
       const allRepairs = await RepairRecord.find({ infrastructure_id: asset._id });
       const openCount = await SharedIssue.countDocuments({
         infrastructure_id: asset._id,
-        status: { $ne: 'Resolved' }
+        status: { $nin: ['Resolved', 'Approved'] }
       });
 
       const updatedRisk = calculateInfrastructureRisk({

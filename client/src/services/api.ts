@@ -249,6 +249,24 @@ export const api = {
     return handleResponse(res);
   },
 
+  async approveIssue(id: number | string, notes?: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/issues/${id}/approve`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ notes, comments: notes })
+    });
+    return handleResponse(res);
+  },
+
+  async rejectIssue(id: number | string, reason: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/issues/${id}/reject`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ reason, comments: reason })
+    });
+    return handleResponse(res);
+  },
+
   async assignIssue(id: number | string, data: { department_id?: number | string; assigned_to_user_id?: number | string; comments?: string }): Promise<any> {
     const res = await fetch(`${API_BASE}/issues/${id}/assign`, {
       method: 'POST',

@@ -312,7 +312,7 @@ router.post('/', authenticateToken, async (req, res) => {
       const allRepairs = await RepairRecord.find({ infrastructure_id: matchedAsset._id });
       const openCount = await SharedIssue.countDocuments({
         infrastructure_id: matchedAsset._id,
-        status: { $ne: 'Resolved' }
+        status: { $nin: ['Resolved', 'Approved'] }
       });
 
       const riskCalc = calculateInfrastructureRisk({

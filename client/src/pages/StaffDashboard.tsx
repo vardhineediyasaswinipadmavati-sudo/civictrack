@@ -58,8 +58,8 @@ export const StaffDashboard: React.FC = () => {
     loadData();
   }, [user]);
 
-  const activeWorkOrders = issues.filter((i) => i.status !== 'Resolved');
-  const completedWorkOrders = issues.filter((i) => i.status === 'Resolved');
+  const activeWorkOrders = issues.filter((i) => i.status !== 'Resolved' && i.status !== 'Approved');
+  const completedWorkOrders = issues.filter((i) => i.status === 'Resolved' || i.status === 'Approved');
 
   const displayedIssues = (tab === 'active' ? activeWorkOrders : completedWorkOrders).filter((i) => {
     const term = search.toLowerCase();
@@ -160,7 +160,7 @@ export const StaffDashboard: React.FC = () => {
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
               <p className="text-xs font-semibold text-rose-600">Urgent Safety Flags</p>
               <p className="text-2xl font-extrabold text-rose-700 mt-1">
-                {formatIndianNumber(issues.filter((i) => i.is_safety_critical && i.status !== 'Resolved').length)}
+                {formatIndianNumber(issues.filter((i) => i.is_safety_critical && i.status !== 'Resolved' && i.status !== 'Approved').length)}
               </p>
               <span className="text-[11px] text-slate-400">Immediate hazard intervention</span>
             </div>
@@ -296,13 +296,13 @@ export const StaffDashboard: React.FC = () => {
                         </td>
                         <td className="px-6 py-4 text-right">
                           <div className="flex items-center justify-end gap-2">
-                            {issue.status !== 'Resolved' && (
+                            {issue.status !== 'Resolved' && issue.status !== 'Approved' && (
                               <button
                                 onClick={() => setActiveRepairIssue(issue)}
                                 className="px-3 py-1.5 bg-civic-600 hover:bg-civic-700 text-white font-bold rounded-xl shadow-sm transition-all text-xs inline-flex items-center gap-1.5"
                               >
                                 <Wrench className="w-3.5 h-3.5" />
-                                <span>Complete Repair</span>
+                                <span>{issue.status === 'Rejected' ? 'Submit Rework' : 'Complete Repair'}</span>
                               </button>
                             )}
                             <Link

@@ -98,6 +98,8 @@ router.get('/', optionalAuth, async (req, res) => {
     const issues = await SharedIssue.find(filter)
       .populate('department_id', 'name code')
       .populate('infrastructure_id', 'name asset_code current_health_status risk_score')
+      .populate('approved_by_user_id', 'name email')
+      .populate('rejected_by_user_id', 'name email')
       .sort({ is_safety_critical: -1, priority_score: -1, created_at: -1 });
 
     const formatted = await Promise.all(
@@ -109,6 +111,8 @@ router.get('/', optionalAuth, async (req, res) => {
 
         const dept = s.department_id;
         const asset = s.infrastructure_id;
+        const approver = s.approved_by_user_id;
+        const rejecter = s.rejected_by_user_id;
 
         return {
           ...s.toJSON(),
@@ -119,6 +123,10 @@ router.get('/', optionalAuth, async (req, res) => {
           infrastructure_id: asset ? (asset._id || asset).toString() : null,
           asset_name: asset ? asset.name : null,
           asset_code: asset ? asset.asset_code : null,
+          approved_by_user_id: approver ? (approver._id || approver).toString() : null,
+          approved_by_name: approver ? approver.name : null,
+          rejected_by_user_id: rejecter ? (rejecter._id || rejecter).toString() : null,
+          rejected_by_name: rejecter ? rejecter.name : null,
           citizen_reports_count: reportCount,
           primary_image: primaryImg ? primaryImg.image_url : null
         };
@@ -185,6 +193,8 @@ router.get('/:id', optionalAuth, async (req, res) => {
     await issue.populate('department_id', 'name code sla_hours');
     await issue.populate('infrastructure_id', 'name asset_code current_health_status risk_score');
     await issue.populate('assigned_to_user_id', 'name email');
+    await issue.populate('approved_by_user_id', 'name email');
+    await issue.populate('rejected_by_user_id', 'name email');
 
     const issueId = issue._id;
 
@@ -258,6 +268,8 @@ router.get('/:id', optionalAuth, async (req, res) => {
     const dept = issue.department_id;
     const asset = issue.infrastructure_id;
     const staff = issue.assigned_to_user_id;
+    const approver = issue.approved_by_user_id;
+    const rejecter = issue.rejected_by_user_id;
 
     const formattedIssue = {
       ...issue.toJSON(),
@@ -272,7 +284,11 @@ router.get('/:id', optionalAuth, async (req, res) => {
       asset_health: asset ? asset.current_health_status : null,
       asset_risk: asset ? asset.risk_score : null,
       assigned_to_user_id: staff ? (staff._id || staff).toString() : null,
-      assigned_staff_name: staff ? staff.name : null
+      assigned_staff_name: staff ? staff.name : null,
+      approved_by_user_id: approver ? (approver._id || approver).toString() : null,
+      approved_by_name: approver ? approver.name : null,
+      rejected_by_user_id: rejecter ? (rejecter._id || rejecter).toString() : null,
+      rejected_by_name: rejecter ? rejecter.name : null
     };
 
     res.json({
@@ -295,15 +311,34 @@ router.get('/:id', optionalAuth, async (req, res) => {
 router.patch('/:id/status', authenticateToken, requireRole('admin', 'department_staff'), async (req, res) => {
   try {
     const { status, comments, resolutionType } = req.body;
-    const validStatuses = ['Pending', 'Assigned', 'In Progress', 'Resolved', 'Reopened', 'Escalated'];
+    const statusMap = {
+      pending: 'Pending',
+      assigned: 'Assigned',
+      'in progress': 'In Progress',
+      in_progress: 'In Progress',
+      resolved: 'Resolved',
+      approved: 'Approved',
+      rejected: 'Rejected',
+      reopened: 'Reopened',
+      escalated: 'Escalated'
+    };
+    const normalizedStatus = status ? (statusMap[String(status).toLowerCase()] || status) : null;
+    const validStatuses = ['Pending', 'Assigned', 'In Progress', 'Resolved', 'Approved', 'Rejected', 'Reopened', 'Escalated'];
 
-    if (!status || !validStatuses.includes(status)) {
+    if (!normalizedStatus || !validStatuses.includes(normalizedStatus)) {
       return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
     }
 
     const currentIssue = await findIssue(req.params.id);
     if (!currentIssue) {
       return res.status(404).json({ error: 'Shared issue not found.' });
+    }
+
+    // Role check: Only Admin can transition directly to Approved or Rejected
+    if (['Approved', 'Rejected'].includes(normalizedStatus) && req.user.role !== 'admin') {
+      return res.status(403).json({
+        error: 'Access denied. Only administrators can approve or reject issue resolutions.'
+      });
     }
 
     // Role check: Department staff can only update issues belonging to their assigned department
@@ -319,9 +354,20 @@ router.patch('/:id/status', authenticateToken, requireRole('admin', 'department_
     }
 
     const now = new Date();
-    currentIssue.status = status;
-    if (status === 'Resolved' && !currentIssue.resolved_at) {
+    const oldStatus = currentIssue.status;
+    currentIssue.status = normalizedStatus;
+    if (normalizedStatus === 'Resolved' && !currentIssue.resolved_at) {
       currentIssue.resolved_at = now;
+    }
+    if (normalizedStatus === 'Approved') {
+      currentIssue.approved_at = now;
+      currentIssue.approved_by_user_id = req.user.id;
+      if (comments) currentIssue.approval_notes = comments;
+    }
+    if (normalizedStatus === 'Rejected') {
+      currentIssue.rejected_at = now;
+      currentIssue.rejected_by_user_id = req.user.id;
+      currentIssue.rejection_reason = comments || 'Repair rejected by administrator. Further work required.';
     }
     if (resolutionType) {
       currentIssue.resolution_type = resolutionType;
@@ -332,40 +378,235 @@ router.patch('/:id/status', authenticateToken, requireRole('admin', 'department_
     // Update status on all linked citizen reports
     await CitizenReport.updateMany(
       { shared_issue_id: currentIssue._id },
-      { status }
+      { status: normalizedStatus }
     );
 
     // Add status history record
     await StatusHistory.create({
       shared_issue_id: currentIssue._id,
-      old_status: currentIssue.status,
-      new_status: status,
+      old_status: oldStatus,
+      new_status: normalizedStatus,
       changed_by_user_id: req.user.id,
-      comments: comments || `Status transitioned to ${status}`
+      comments: comments || `Status transitioned to ${normalizedStatus}`
     });
 
-    // Notify all linked citizens & followers
+    // Create Audit Log for administrative approval or rejection
+    if (normalizedStatus === 'Approved') {
+      await AuditLog.create({
+        action: 'ISSUE_APPROVED',
+        entity_type: 'shared_issue',
+        entity_id: currentIssue._id,
+        user_id: req.user.id,
+        details: JSON.stringify({
+          issue_code: currentIssue.issue_code,
+          approval_notes: comments || null,
+          approved_at: now
+        })
+      });
+    } else if (normalizedStatus === 'Rejected') {
+      await AuditLog.create({
+        action: 'ISSUE_REJECTED',
+        entity_type: 'shared_issue',
+        entity_id: currentIssue._id,
+        user_id: req.user.id,
+        details: JSON.stringify({
+          issue_code: currentIssue.issue_code,
+          rejection_reason: currentIssue.rejection_reason,
+          rejected_at: now
+        })
+      });
+    }
+
+    // Notify all linked citizens, followers, and assigned staff
     const [reporters, followers] = await Promise.all([
       CitizenReport.find({ shared_issue_id: currentIssue._id }).distinct('user_id'),
       IssueFollow.find({ shared_issue_id: currentIssue._id }).distinct('user_id')
     ]);
 
     const linkedUserIds = new Set([...reporters, ...followers].map((id) => id.toString()));
+    if (currentIssue.assigned_to_user_id) {
+      linkedUserIds.add(currentIssue.assigned_to_user_id.toString());
+    }
+
+    let notifTitle = `Status Update: Issue ${currentIssue.issue_code}`;
+    let notifMessage = `The status of civic issue "${currentIssue.title}" has been updated to ${normalizedStatus}.`;
+    if (normalizedStatus === 'Approved') {
+      notifTitle = `Repair Approved: Issue ${currentIssue.issue_code}`;
+      notifMessage = `Municipal administration has verified and approved the repair for "${currentIssue.title}". Complaint is now officially closed.`;
+    } else if (normalizedStatus === 'Rejected') {
+      notifTitle = `Rework Required: Issue ${currentIssue.issue_code}`;
+      notifMessage = `The repair for "${currentIssue.title}" was rejected by administration: ${currentIssue.rejection_reason}. Returned for rework.`;
+    }
 
     for (const uId of linkedUserIds) {
       await Notification.create({
         user_id: uId,
-        title: `Status Update: Issue ${currentIssue.issue_code}`,
-        message: `The status of civic issue "${currentIssue.title}" has been updated to ${status}.`,
+        title: notifTitle,
+        message: notifMessage,
         link_url: `/issues/${currentIssue._id.toString()}`,
         is_read: false
       });
     }
 
-    res.json({ message: `Status updated to ${status} successfully.`, newStatus: status });
+    res.json({ message: `Status updated to ${normalizedStatus} successfully.`, newStatus: normalizedStatus });
   } catch (err) {
     console.error('Update status error:', err);
     res.status(500).json({ error: 'Failed to update issue status.' });
+  }
+});
+
+// Dedicated Admin Approve Resolution endpoint
+router.post('/:id/approve', authenticateToken, requireRole('admin'), async (req, res) => {
+  try {
+    const { comments, notes } = req.body;
+    const currentIssue = await findIssue(req.params.id);
+    if (!currentIssue) {
+      return res.status(404).json({ error: 'Shared issue not found.' });
+    }
+
+    const oldStatus = currentIssue.status;
+    const now = new Date();
+    currentIssue.status = 'Approved';
+    currentIssue.approved_at = now;
+    currentIssue.approved_by_user_id = req.user.id;
+    currentIssue.approval_notes = (comments || notes || '').trim() || null;
+    currentIssue.updated_at = now;
+    await currentIssue.save();
+
+    await CitizenReport.updateMany(
+      { shared_issue_id: currentIssue._id },
+      { status: 'Approved' }
+    );
+
+    await StatusHistory.create({
+      shared_issue_id: currentIssue._id,
+      old_status: oldStatus,
+      new_status: 'Approved',
+      changed_by_user_id: req.user.id,
+      comments: currentIssue.approval_notes || 'Administrator verified repair and approved complaint closure.'
+    });
+
+    await AuditLog.create({
+      action: 'ISSUE_APPROVED',
+      entity_type: 'shared_issue',
+      entity_id: currentIssue._id,
+      user_id: req.user.id,
+      details: JSON.stringify({
+        issue_code: currentIssue.issue_code,
+        approval_notes: currentIssue.approval_notes,
+        approved_at: now
+      })
+    });
+
+    const [reporters, followers] = await Promise.all([
+      CitizenReport.find({ shared_issue_id: currentIssue._id }).distinct('user_id'),
+      IssueFollow.find({ shared_issue_id: currentIssue._id }).distinct('user_id')
+    ]);
+
+    const notifyUserIds = new Set([...reporters, ...followers].map((id) => id.toString()));
+    if (currentIssue.assigned_to_user_id) {
+      notifyUserIds.add(currentIssue.assigned_to_user_id.toString());
+    }
+
+    for (const uId of notifyUserIds) {
+      await Notification.create({
+        user_id: uId,
+        title: `Repair Approved: Issue ${currentIssue.issue_code}`,
+        message: `Municipal administration has verified and approved the repair for "${currentIssue.title}". Complaint is officially closed.`,
+        link_url: `/issues/${currentIssue._id.toString()}`,
+        is_read: false
+      });
+    }
+
+    res.json({
+      message: `Issue ${currentIssue.issue_code} successfully approved and closed.`,
+      status: 'Approved',
+      approved_at: currentIssue.approved_at,
+      approval_notes: currentIssue.approval_notes
+    });
+  } catch (err) {
+    console.error('Approve issue error:', err);
+    res.status(500).json({ error: 'Failed to approve issue resolution.' });
+  }
+});
+
+// Dedicated Admin Reject Resolution endpoint
+router.post('/:id/reject', authenticateToken, requireRole('admin'), async (req, res) => {
+  try {
+    const { reason, comments } = req.body;
+    const rejectionReason = (reason || comments || '').trim();
+    if (!rejectionReason || rejectionReason.length < 5) {
+      return res.status(400).json({ error: 'A specific rejection reason (at least 5 characters) is required to return an issue for rework.' });
+    }
+
+    const currentIssue = await findIssue(req.params.id);
+    if (!currentIssue) {
+      return res.status(404).json({ error: 'Shared issue not found.' });
+    }
+
+    const oldStatus = currentIssue.status;
+    const now = new Date();
+    currentIssue.status = 'Rejected';
+    currentIssue.rejected_at = now;
+    currentIssue.rejected_by_user_id = req.user.id;
+    currentIssue.rejection_reason = rejectionReason;
+    currentIssue.updated_at = now;
+    await currentIssue.save();
+
+    await CitizenReport.updateMany(
+      { shared_issue_id: currentIssue._id },
+      { status: 'Rejected' }
+    );
+
+    await StatusHistory.create({
+      shared_issue_id: currentIssue._id,
+      old_status: oldStatus,
+      new_status: 'Rejected',
+      changed_by_user_id: req.user.id,
+      comments: `Repair rejected: ${rejectionReason}`
+    });
+
+    await AuditLog.create({
+      action: 'ISSUE_REJECTED',
+      entity_type: 'shared_issue',
+      entity_id: currentIssue._id,
+      user_id: req.user.id,
+      details: JSON.stringify({
+        issue_code: currentIssue.issue_code,
+        rejection_reason: rejectionReason,
+        rejected_at: now
+      })
+    });
+
+    const [reporters, followers] = await Promise.all([
+      CitizenReport.find({ shared_issue_id: currentIssue._id }).distinct('user_id'),
+      IssueFollow.find({ shared_issue_id: currentIssue._id }).distinct('user_id')
+    ]);
+
+    const notifyUserIds = new Set([...reporters, ...followers].map((id) => id.toString()));
+    if (currentIssue.assigned_to_user_id) {
+      notifyUserIds.add(currentIssue.assigned_to_user_id.toString());
+    }
+
+    for (const uId of notifyUserIds) {
+      await Notification.create({
+        user_id: uId,
+        title: `Rework Required: Issue ${currentIssue.issue_code}`,
+        message: `The repair for "${currentIssue.title}" was rejected by administration: ${rejectionReason}. Returned to staff for rework.`,
+        link_url: `/issues/${currentIssue._id.toString()}`,
+        is_read: false
+      });
+    }
+
+    res.json({
+      message: `Issue ${currentIssue.issue_code} returned for rework.`,
+      status: 'Rejected',
+      rejected_at: currentIssue.rejected_at,
+      rejection_reason: currentIssue.rejection_reason
+    });
+  } catch (err) {
+    console.error('Reject issue error:', err);
+    res.status(500).json({ error: 'Failed to reject issue resolution.' });
   }
 });
 
@@ -447,10 +688,11 @@ router.post('/:id/reopen', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Issue not found.' });
     }
 
-    if (issue.status !== 'Resolved') {
-      return res.status(400).json({ error: 'Only resolved issues can be reopened.' });
+    if (!['Resolved', 'Approved'].includes(issue.status)) {
+      return res.status(400).json({ error: 'Only resolved or approved issues can be reopened.' });
     }
 
+    const previousStatus = issue.status;
     const now = new Date();
     issue.status = 'Reopened';
     issue.resolved_at = null;
@@ -461,7 +703,7 @@ router.post('/:id/reopen', authenticateToken, async (req, res) => {
 
     await StatusHistory.create({
       shared_issue_id: issue._id,
-      old_status: 'Resolved',
+      old_status: previousStatus,
       new_status: 'Reopened',
       changed_by_user_id: req.user.id,
       comments: `Reopened: ${reason.trim()}`
@@ -789,7 +1031,7 @@ router.post('/:id/associate-asset', authenticateToken, requireRole('admin'), asy
     const allRepairs = await RepairRecord.find({ infrastructure_id: asset._id });
     const openCount = await SharedIssue.countDocuments({
       infrastructure_id: asset._id,
-      status: { $ne: 'Resolved' }
+      status: { $nin: ['Resolved', 'Approved'] }
     });
 
     const updatedRisk = calculateInfrastructureRisk({

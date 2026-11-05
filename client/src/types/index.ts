@@ -51,7 +51,7 @@ export interface InfrastructureAsset {
   created_at: string;
 }
 
-export type IssueStatus = 'Pending' | 'Assigned' | 'In Progress' | 'Resolved' | 'Reopened' | 'Escalated';
+export type IssueStatus = 'Pending' | 'Assigned' | 'In Progress' | 'Resolved' | 'Approved' | 'Rejected' | 'Reopened' | 'Escalated';
 export type IssueSeverity = 'Low' | 'Medium' | 'High' | 'Critical';
 
 export interface SharedIssue {
@@ -79,6 +79,14 @@ export interface SharedIssue {
   incident_id?: string | number | null;
   assigned_to_user_id?: string | number | null;
   assigned_staff_name?: string | null;
+  approved_at?: string | null;
+  approved_by_user_id?: string | number | null;
+  approved_by_name?: string | null;
+  approval_notes?: string | null;
+  rejected_at?: string | null;
+  rejected_by_user_id?: string | number | null;
+  rejected_by_name?: string | null;
+  rejection_reason?: string | null;
   estimated_affected_population: number;
   affected_population_details?: string | null;
   first_reported_at: string;

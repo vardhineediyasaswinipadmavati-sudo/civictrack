@@ -30,7 +30,9 @@ import {
   ShieldAlert,
   ThumbsUp,
   ThumbsDown,
-  MessageSquare
+  MessageSquare,
+  ShieldCheck,
+  XCircle
 } from 'lucide-react';
 
 export const IssueDetailPage: React.FC = () => {
@@ -55,6 +57,12 @@ export const IssueDetailPage: React.FC = () => {
   const [showMergeModal, setShowMergeModal] = useState(false);
   const [showAssociateModal, setShowAssociateModal] = useState(false);
   const [showRepairModal, setShowRepairModal] = useState(false);
+  const [showApproveModal, setShowApproveModal] = useState(false);
+  const [approvalNotes, setApprovalNotes] = useState('');
+  const [approving, setApproving] = useState(false);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [rejecting, setRejecting] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [feedback, setFeedback] = useState('');
 
@@ -95,6 +103,38 @@ export const IssueDetailPage: React.FC = () => {
       await loadIssue();
     } catch (err: any) {
       alert(err.message || 'Failed to reopen issue');
+    }
+  };
+
+  const handleApprove = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id) return;
+    setApproving(true);
+    try {
+      await api.approveIssue(id, approvalNotes);
+      setShowApproveModal(false);
+      setApprovalNotes('');
+      await loadIssue();
+    } catch (err: any) {
+      alert(err.message || 'Failed to approve issue');
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  const handleReject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id || !rejectionReason.trim()) return;
+    setRejecting(true);
+    try {
+      await api.rejectIssue(id, rejectionReason.trim());
+      setShowRejectModal(false);
+      setRejectionReason('');
+      await loadIssue();
+    } catch (err: any) {
+      alert(err.message || 'Failed to reject issue');
+    } finally {
+      setRejecting(false);
     }
   };
 
@@ -184,7 +224,7 @@ export const IssueDetailPage: React.FC = () => {
             </button>
 
             {/* Reopen Action (Section 3: Citizen or staff can reopen if problem returned) */}
-            {issue.status === 'Resolved' && (
+            {(issue.status === 'Resolved' || issue.status === 'Approved') && (
               <button
                 onClick={() => setShowReopenModal(true)}
                 className="px-3.5 py-1.5 rounded-xl bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 text-xs font-bold transition-colors flex items-center gap-1.5"
@@ -193,13 +233,31 @@ export const IssueDetailPage: React.FC = () => {
               </button>
             )}
 
+            {/* Admin Direct Approve / Reject Actions */}
+            {user?.role === 'admin' && issue.status === 'Resolved' && (
+              <>
+                <button
+                  onClick={() => { setApprovalNotes(''); setShowApproveModal(true); }}
+                  className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm transition-all flex items-center gap-1.5"
+                >
+                  <ShieldCheck className="w-4 h-4" /> Approve Resolution
+                </button>
+                <button
+                  onClick={() => { setRejectionReason(''); setShowRejectModal(true); }}
+                  className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm transition-all flex items-center gap-1.5"
+                >
+                  <XCircle className="w-4 h-4" /> Reject (Rework)
+                </button>
+              </>
+            )}
+
             {/* Staff / Admin Complete Repair Action */}
-            {(user?.role === 'admin' || user?.role === 'department_staff') && issue.status !== 'Resolved' && (
+            {(user?.role === 'admin' || user?.role === 'department_staff') && issue.status !== 'Resolved' && issue.status !== 'Approved' && (
               <button
                 onClick={() => setShowRepairModal(true)}
                 className="px-3.5 py-1.5 rounded-xl bg-civic-600 hover:bg-civic-700 text-white font-bold text-xs shadow-sm transition-all flex items-center gap-1.5"
               >
-                <Wrench className="w-4 h-4" /> Complete Repair
+                <Wrench className="w-4 h-4" /> {issue.status === 'Rejected' ? 'Submit Rework' : 'Complete Repair'}
               </button>
             )}
 
@@ -292,6 +350,133 @@ export const IssueDetailPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Admin Approved Verification Banner */}
+      {issue.status === 'Approved' && (
+        <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-green-50 border border-emerald-200/90 rounded-2xl p-5 shadow-xs space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-slate-900 text-sm sm:text-base">
+                    Administrator Verified & Closed
+                  </h3>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                    Verified Closure
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Municipal administration verified that field remediation satisfies civic infrastructure standards.
+                </p>
+              </div>
+            </div>
+            {issue.approved_at && (
+              <span className="text-[11px] font-medium text-emerald-800 bg-white/80 px-3 py-1 rounded-xl border border-emerald-200 self-start sm:self-auto shrink-0">
+                Approved: {new Date(issue.approved_at).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+              </span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-emerald-200/60 text-xs">
+            <div>
+              <span className="text-[11px] text-slate-500 font-medium block">Approving Administrator</span>
+              <span className="font-bold text-slate-800">{issue.approved_by_name || 'Municipal Administrator'}</span>
+            </div>
+            <div>
+              <span className="text-[11px] text-slate-500 font-medium block">Staff Repair Completed</span>
+              <span className="font-bold text-slate-800">
+                {issue.resolved_at ? new Date(issue.resolved_at).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' }) : 'Logged on resolution'}
+              </span>
+            </div>
+            <div>
+              <span className="text-[11px] text-slate-500 font-medium block">Administrative Remarks</span>
+              <span className="font-medium text-slate-700 italic">
+                {issue.approval_notes ? `"${issue.approval_notes}"` : 'Repairs verified against municipal quality guidelines.'}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Rejected / Rework Banner */}
+      {issue.status === 'Rejected' && (
+        <div className="bg-gradient-to-r from-rose-50 via-amber-50/40 to-rose-50 border border-rose-200 rounded-2xl p-5 shadow-xs space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <XCircle className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-rose-900 text-sm sm:text-base">
+                    Repair Rejected — Returned for Department Rework
+                  </h3>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200">
+                    Rework Required
+                  </span>
+                </div>
+                <p className="text-xs text-rose-700 mt-0.5">
+                  Administrative review identified defects in the repair. Field crews must perform corrective action and resubmit.
+                </p>
+              </div>
+            </div>
+            {issue.rejected_at && (
+              <span className="text-[11px] font-medium text-rose-800 bg-white/80 px-3 py-1 rounded-xl border border-rose-200 self-start sm:self-auto shrink-0">
+                Rejected: {new Date(issue.rejected_at).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+              </span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-rose-200/60 text-xs">
+            <div>
+              <span className="text-[11px] text-slate-500 font-medium block">Reviewing Administrator</span>
+              <span className="font-bold text-slate-800">{issue.rejected_by_name || 'Municipal Operations Reviewer'}</span>
+            </div>
+            <div>
+              <span className="text-[11px] text-slate-500 font-medium block">Rejection Feedback & Required Remediation</span>
+              <span className="font-bold text-rose-800 block mt-0.5 bg-rose-100/60 p-2 rounded-lg border border-rose-200/80">
+                "{issue.rejection_reason || 'Remediation does not meet municipal standards; further work required.'}"
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Staff Resolved (Awaiting Approval) Notice for Admin */}
+      {issue.status === 'Resolved' && user?.role === 'admin' && (
+        <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-emerald-50 border border-blue-200 rounded-2xl p-5 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+              <CheckCircle2 className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-900 text-sm sm:text-base">
+                Staff Completed Repair — Awaiting Administrator Approval
+              </h3>
+              <p className="text-xs text-slate-600 mt-0.5">
+                Department field staff have submitted repair evidence. Review the work summary and photos below, then approve or reject closure.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => { setApprovalNotes(''); setShowApproveModal(true); }}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-sm transition-all flex items-center gap-1.5"
+            >
+              <ShieldCheck className="w-4 h-4" /> Approve Resolution
+            </button>
+            <button
+              onClick={() => { setRejectionReason(''); setShowRejectModal(true); }}
+              className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-sm transition-all flex items-center gap-1.5"
+            >
+              <XCircle className="w-4 h-4" /> Reject (Rework)
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Grid: Left = Reports & Resolution, Right = History & Verification */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -453,7 +638,7 @@ export const IssueDetailPage: React.FC = () => {
         {/* Right Column (1 Col) */}
         <div className="space-y-6">
           {/* Citizen Verification Card (Section 3: Citizens verify whether repairs are effective) */}
-          {issue.status === 'Resolved' && (
+          {(issue.status === 'Resolved' || issue.status === 'Approved') && (
             <div className="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-2xl border border-emerald-200 p-6 shadow-sm space-y-4 text-xs">
               <div>
                 <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
@@ -461,7 +646,7 @@ export const IssueDetailPage: React.FC = () => {
                   Verify Repair Effectiveness
                 </h3>
                 <p className="text-slate-600 mt-1">
-                  Authorities marked this problem as resolved. As a resident in this community, does the repair hold up?
+                  Authorities marked this problem as repaired. As a resident in this community, does the repair hold up?
                 </p>
               </div>
 
@@ -542,6 +727,114 @@ export const IssueDetailPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Admin Approve Resolution Modal */}
+      {showApproveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 text-xs">
+            <div className="flex items-center gap-2 mb-2 text-emerald-700">
+              <ShieldCheck className="w-5 h-5 text-emerald-600" />
+              <h3 className="text-sm font-bold text-slate-900">
+                Approve & Close Issue {issue.issue_code}
+              </h3>
+            </div>
+            <p className="text-slate-600 mb-3">
+              Confirm that the physical remediation submitted by staff meets municipal standards. This will officially verify closure and notify all citizen reporters and followers.
+            </p>
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 mb-4 space-y-1">
+              <p className="font-semibold text-slate-900">{issue.title}</p>
+              <p className="text-slate-500 text-[11px]">{issue.address}</p>
+            </div>
+            <form onSubmit={handleApprove} className="space-y-4">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Administrative Approval Remarks (Optional)
+                </label>
+                <textarea
+                  rows={3}
+                  value={approvalNotes}
+                  onChange={(e) => setApprovalNotes(e.target.value)}
+                  placeholder="e.g. Field inspection verified road repaving meets quality guidelines. Closure approved."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowApproveModal(false)}
+                  className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={approving}
+                  className="px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition-colors shadow-sm flex items-center gap-1.5"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>{approving ? 'Approving...' : 'Confirm Approval & Close'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Reject Resolution Modal */}
+      {showRejectModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 text-xs">
+            <div className="flex items-center gap-2 mb-2 text-rose-700">
+              <XCircle className="w-5 h-5 text-rose-600" />
+              <h3 className="text-sm font-bold text-slate-900">
+                Reject Repair & Request Rework ({issue.issue_code})
+              </h3>
+            </div>
+            <p className="text-slate-600 mb-3">
+              Return this complaint to the assigned department staff for further remediation. The previously submitted repair records and evidence are preserved.
+            </p>
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 mb-4 space-y-1">
+              <p className="font-semibold text-slate-900">{issue.title}</p>
+              <p className="text-slate-500 text-[11px]">{issue.address}</p>
+            </div>
+            <form onSubmit={handleReject} className="space-y-4">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Reason for Rejection <span className="text-rose-600">*</span>
+                </label>
+                <textarea
+                  required
+                  rows={3}
+                  value={rejectionReason}
+                  onChange={(e) => setRejectionReason(e.target.value)}
+                  placeholder="e.g. Surface patch uneven; asphalt layer washed out; drain grate not properly fastened..."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-1 focus:ring-rose-500"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  Minimum 5 characters required explaining the defect to staff.
+                </span>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRejectModal(false)}
+                  className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={rejecting || rejectionReason.trim().length < 5}
+                  className="px-4 py-2 bg-rose-600 text-white rounded-xl font-bold hover:bg-rose-700 transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <XCircle className="w-4 h-4" />
+                  <span>{rejecting ? 'Rejecting...' : 'Return for Rework'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Reopen Modal */}
       {showReopenModal && (

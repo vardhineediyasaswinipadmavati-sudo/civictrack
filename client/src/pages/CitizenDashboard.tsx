@@ -62,8 +62,8 @@ export const CitizenDashboard: React.FC = () => {
 
   const totalReports = reports.length;
   const pendingReports = reports.filter((r) => (r.shared_status || r.status) === 'Pending').length;
-  const inProgressReports = reports.filter((r) => ['Assigned', 'In Progress', 'Escalated'].includes(r.shared_status || r.status)).length;
-  const resolvedReports = reports.filter((r) => (r.shared_status || r.status) === 'Resolved').length;
+  const inProgressReports = reports.filter((r) => ['Assigned', 'In Progress', 'Escalated', 'Rejected'].includes(r.shared_status || r.status)).length;
+  const resolvedReports = reports.filter((r) => ['Resolved', 'Approved'].includes(r.shared_status || r.status)).length;
 
   const filteredReports = reports.filter((r) => {
     const term = search.toLowerCase();
@@ -270,8 +270,11 @@ export const CitizenDashboard: React.FC = () => {
                   >
                     <option value="">All Statuses</option>
                     <option value="Pending">Pending</option>
+                    <option value="Assigned">Assigned</option>
                     <option value="In Progress">In Progress</option>
-                    <option value="Resolved">Resolved</option>
+                    <option value="Resolved">Resolved (Awaiting Approval)</option>
+                    <option value="Approved">Approved (Verified Closure)</option>
+                    <option value="Rejected">Rejected (Rework)</option>
                     <option value="Reopened">Reopened</option>
                   </select>
                 </div>
