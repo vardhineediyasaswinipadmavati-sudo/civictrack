@@ -21,11 +21,15 @@ function getAuthHeaders(): HeadersInit {
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let errorMsg = `Request failed (${res.status})`;
+    let missingFields: string[] | undefined = undefined;
     try {
       const text = await res.text();
       try {
         const data = JSON.parse(text);
         errorMsg = data.error || data.message || errorMsg;
+        if (Array.isArray(data.missingFields)) {
+          missingFields = data.missingFields;
+        }
       } catch {
         if (text && text.length < 200 && !text.includes('<!DOCTYPE')) {
           errorMsg = text;
@@ -36,7 +40,9 @@ async function handleResponse<T>(res: Response): Promise<T> {
     if (res.status === 503) {
       errorMsg = errorMsg || 'Municipal database service is temporarily unavailable. Please verify network access.';
     }
-    throw new Error(errorMsg);
+    const err: any = new Error(errorMsg);
+    if (missingFields) err.missingFields = missingFields;
+    throw err;
   }
   return res.json();
 }
@@ -233,6 +239,10 @@ export const api = {
     verifications: any[];
     followersCount: number;
     isFollowing?: boolean;
+    repairValidation?: {
+      isValid: boolean;
+      missingFields: string[];
+    };
   }> {
     const res = await fetch(`${API_BASE}/issues/${id}`, {
       headers: getAuthHeaders()

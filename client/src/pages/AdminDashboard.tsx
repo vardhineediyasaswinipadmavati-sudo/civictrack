@@ -27,7 +27,8 @@ import {
   Users,
   ShieldCheck,
   Wrench,
-  XCircle
+  XCircle,
+  AlertCircle
 } from 'lucide-react';
 import { formatIndianNumber } from '../utils/currency';
 
@@ -56,6 +57,8 @@ export const AdminDashboard: React.FC = () => {
   const [approveModalIssue, setApproveModalIssue] = useState<SharedIssue | null>(null);
   const [approvalNotes, setApprovalNotes] = useState('');
   const [approving, setApproving] = useState(false);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
+  const [approvalMissingFields, setApprovalMissingFields] = useState<string[]>([]);
 
   const [rejectModalIssue, setRejectModalIssue] = useState<SharedIssue | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
@@ -107,6 +110,8 @@ export const AdminDashboard: React.FC = () => {
     e.preventDefault();
     if (!approveModalIssue) return;
     setApproving(true);
+    setApprovalError(null);
+    setApprovalMissingFields([]);
     try {
       await api.approveIssue(approveModalIssue.id, approvalNotes);
       setApproveModalIssue(null);
@@ -114,7 +119,10 @@ export const AdminDashboard: React.FC = () => {
       await loadData();
     } catch (err: any) {
       console.error('Approval error', err);
-      alert(err?.message || 'Failed to approve issue resolution.');
+      setApprovalError(err?.message || 'Failed to approve issue resolution.');
+      if (Array.isArray(err?.missingFields)) {
+        setApprovalMissingFields(err.missingFields);
+      }
     } finally {
       setApproving(false);
     }
@@ -424,7 +432,12 @@ export const AdminDashboard: React.FC = () => {
                             {issue.status === 'Resolved' && (
                               <>
                                 <button
-                                  onClick={() => { setApproveModalIssue(issue); setApprovalNotes(''); }}
+                                  onClick={() => {
+                                    setApproveModalIssue(issue);
+                                    setApprovalNotes('');
+                                    setApprovalError(null);
+                                    setApprovalMissingFields([]);
+                                  }}
                                   className="px-2 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors inline-flex items-center gap-1 shadow-xs"
                                   title="Approve staff repair and close complaint"
                                 >
@@ -662,6 +675,27 @@ export const AdminDashboard: React.FC = () => {
               <p className="font-semibold text-slate-900">{approveModalIssue.title}</p>
               <p className="text-slate-500 text-[11px]">{approveModalIssue.address}</p>
             </div>
+
+            {approvalError && (
+              <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 space-y-1.5 mb-3">
+                <div className="flex items-center gap-1.5 font-bold text-xs text-rose-900">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>Approval Blocked: Incomplete Repair Records</span>
+                </div>
+                <p className="text-[11px] text-rose-700">{approvalError}</p>
+                {approvalMissingFields.length > 0 && (
+                  <ul className="list-disc list-inside space-y-0.5 text-[11px] text-rose-800 font-semibold pl-1">
+                    {approvalMissingFields.map((field, idx) => (
+                      <li key={idx}>{field}</li>
+                    ))}
+                  </ul>
+                )}
+                <p className="text-[10px] text-rose-600 italic">
+                  Field staff must log complete repair information and before/after photos before this issue can be approved.
+                </p>
+              </div>
+            )}
+
             <form onSubmit={handleApproveSubmit} className="space-y-4">
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">

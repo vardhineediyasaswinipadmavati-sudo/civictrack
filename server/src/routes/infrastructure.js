@@ -14,6 +14,7 @@ import {
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 import { calculateInfrastructureRisk } from '../utils/riskPredictor.js';
 import { seedDemoInfrastructureAssets } from '../db/demoAssets.js';
+import { validateRepairSubmission } from '../utils/repairValidator.js';
 
 const router = express.Router();
 
@@ -432,14 +433,29 @@ async function handleRecordRepair(req, res) {
       return res.status(400).json({ error: 'A valid complaint issue or infrastructure asset is required to record a repair.' });
     }
 
-    const validRepairTypes = ['temporary', 'permanent', 'inspection_only', 'no_fault'];
-    if (!repair_type || !validRepairTypes.includes(repair_type)) {
-      return res.status(400).json({ error: `Invalid repair type. Must be one of: ${validRepairTypes.join(', ')}` });
+    // Retrieve citizen evidence images for this complaint if any
+    let citizenEvidenceImages = [];
+    if (resolvedIssueId) {
+      citizenEvidenceImages = await ReportImage.find({
+        shared_issue_id: resolvedIssueId,
+        image_type: 'evidence'
+      }).distinct('image_url');
     }
 
-    if (!work_summary || work_summary.trim().length < 5) {
-      return res.status(400).json({ error: 'A clear work summary (at least 5 characters) is required.' });
+    // Validate mandatory repair details on backend
+    const submissionValidation = validateRepairSubmission(req.body, citizenEvidenceImages);
+    if (!submissionValidation.isValid) {
+      return res.status(400).json({ error: submissionValidation.error });
     }
+
+    const {
+      repair_type: validatedRepairType,
+      work_summary: validatedWorkSummary,
+      materials_used: validatedMaterials,
+      cost_amount: validatedCost,
+      before_image_url: validatedBeforeUrl,
+      after_image_url: validatedAfterUrl
+    } = submissionValidation.normalizedData;
 
     let resolvedDeptId = req.user.department_id || department_id || (resolvedIssue ? resolvedIssue.department_id : null);
     if (!resolvedDeptId) {
@@ -457,39 +473,35 @@ async function handleRecordRepair(req, res) {
       shared_issue_id: resolvedIssueId,
       repaired_by_user_id: req.user.id,
       department_id: resolvedDeptId,
-      repair_type,
-      cost_amount: cost_unavailable ? null : (cost_amount !== undefined && cost_amount !== null ? Number(cost_amount) : null),
-      cost_unavailable: Boolean(cost_unavailable),
-      materials_used: materials_used || null,
-      work_summary: work_summary.trim(),
+      repair_type: validatedRepairType,
+      cost_amount: validatedCost,
+      cost_unavailable: false,
+      materials_used: validatedMaterials,
+      work_summary: validatedWorkSummary,
       completed_at: now
     });
 
-    // Attach before & after images
-    if (before_image_url) {
-      await ReportImage.create({
-        shared_issue_id: resolvedIssueId,
-        repair_id: newRepair._id,
-        image_url: before_image_url,
-        image_type: 'before_repair'
-      });
-    }
+    // Attach required before & after images
+    await ReportImage.create({
+      shared_issue_id: resolvedIssueId,
+      repair_id: newRepair._id,
+      image_url: validatedBeforeUrl,
+      image_type: 'before_repair'
+    });
 
-    if (after_image_url) {
-      await ReportImage.create({
-        shared_issue_id: resolvedIssueId,
-        repair_id: newRepair._id,
-        image_url: after_image_url,
-        image_type: 'after_repair'
-      });
-    }
+    await ReportImage.create({
+      shared_issue_id: resolvedIssueId,
+      repair_id: newRepair._id,
+      image_url: validatedAfterUrl,
+      image_type: 'after_repair'
+    });
 
     // If linked to shared issue, transition issue to Resolved with resolutionType
     if (resolvedIssue) {
       resolvedIssue.status = 'Resolved';
       resolvedIssue.resolved_at = now;
-      resolvedIssue.resolution_type = repair_type;
-      resolvedIssue.resolution_notes = work_summary.trim();
+      resolvedIssue.resolution_type = validatedRepairType;
+      resolvedIssue.resolution_notes = validatedWorkSummary;
       resolvedIssue.updated_at = now;
       await resolvedIssue.save();
 
@@ -500,7 +512,7 @@ async function handleRecordRepair(req, res) {
         old_status: 'In Progress',
         new_status: 'Resolved',
         changed_by_user_id: req.user.id,
-        comments: `Repair completed (${repair_type}): ${work_summary.trim()}`
+        comments: `Repair completed (${validatedRepairType}): ${validatedWorkSummary}`
       });
 
       // Notify linked citizens
@@ -509,7 +521,7 @@ async function handleRecordRepair(req, res) {
         await Notification.create({
           user_id: uId,
           title: 'Repair Completed',
-          message: `Work has been completed on your reported issue (${repair_type}). Please help verify if the repair is effective!`,
+          message: `Work has been completed on your reported issue (${validatedRepairType}). Please help verify if the repair is effective!`,
           link_url: `/issues/${resolvedIssue._id.toString()}`,
           is_read: false
         });

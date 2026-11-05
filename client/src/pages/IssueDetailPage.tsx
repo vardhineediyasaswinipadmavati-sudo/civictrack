@@ -32,7 +32,8 @@ import {
   ThumbsDown,
   MessageSquare,
   ShieldCheck,
-  XCircle
+  XCircle,
+  AlertCircle
 } from 'lucide-react';
 
 export const IssueDetailPage: React.FC = () => {
@@ -48,6 +49,10 @@ export const IssueDetailPage: React.FC = () => {
     repairs: RepairRecord[];
     verifications: CitizenVerification[];
     followersCount: number;
+    repairValidation?: {
+      isValid: boolean;
+      missingFields: string[];
+    };
   } | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -60,6 +65,8 @@ export const IssueDetailPage: React.FC = () => {
   const [showApproveModal, setShowApproveModal] = useState(false);
   const [approvalNotes, setApprovalNotes] = useState('');
   const [approving, setApproving] = useState(false);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
+  const [approvalMissingFields, setApprovalMissingFields] = useState<string[]>([]);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
   const [rejecting, setRejecting] = useState(false);
@@ -110,13 +117,18 @@ export const IssueDetailPage: React.FC = () => {
     e.preventDefault();
     if (!id) return;
     setApproving(true);
+    setApprovalError(null);
+    setApprovalMissingFields([]);
     try {
       await api.approveIssue(id, approvalNotes);
       setShowApproveModal(false);
       setApprovalNotes('');
       await loadIssue();
     } catch (err: any) {
-      alert(err.message || 'Failed to approve issue');
+      setApprovalError(err.message || 'Failed to approve issue resolution.');
+      if (Array.isArray(err.missingFields)) {
+        setApprovalMissingFields(err.missingFields);
+      }
     } finally {
       setApproving(false);
     }
@@ -181,7 +193,7 @@ export const IssueDetailPage: React.FC = () => {
     );
   }
 
-  const { issue, citizenReports, images, history, repairs, verifications, followersCount } = data;
+  const { issue, citizenReports, images, history, repairs, verifications, followersCount, repairValidation } = data;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
@@ -237,7 +249,12 @@ export const IssueDetailPage: React.FC = () => {
             {user?.role === 'admin' && issue.status === 'Resolved' && (
               <>
                 <button
-                  onClick={() => { setApprovalNotes(''); setShowApproveModal(true); }}
+                  onClick={() => {
+                    setApprovalError(null);
+                    setApprovalMissingFields([]);
+                    setApprovalNotes('');
+                    setShowApproveModal(true);
+                  }}
                   className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm transition-all flex items-center gap-1.5"
                 >
                   <ShieldCheck className="w-4 h-4" /> Approve Resolution
@@ -447,34 +464,62 @@ export const IssueDetailPage: React.FC = () => {
 
       {/* Staff Resolved (Awaiting Approval) Notice for Admin */}
       {issue.status === 'Resolved' && user?.role === 'admin' && (
-        <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-emerald-50 border border-blue-200 rounded-2xl p-5 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-              <CheckCircle2 className="w-5 h-5" />
+        <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-emerald-50 border border-blue-200 rounded-2xl p-5 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-900 text-sm sm:text-base">
+                  Staff Completed Repair — Awaiting Administrator Approval
+                </h3>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Department field staff have submitted repair evidence. Review the work summary and photos below, then approve or reject closure.
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 className="font-bold text-slate-900 text-sm sm:text-base">
-                Staff Completed Repair — Awaiting Administrator Approval
-              </h3>
-              <p className="text-xs text-slate-600 mt-0.5">
-                Department field staff have submitted repair evidence. Review the work summary and photos below, then approve or reject closure.
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => {
+                  setApprovalError(null);
+                  setApprovalMissingFields([]);
+                  setApprovalNotes('');
+                  setShowApproveModal(true);
+                }}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-sm transition-all flex items-center gap-1.5"
+              >
+                <ShieldCheck className="w-4 h-4" /> Approve Resolution
+              </button>
+              <button
+                onClick={() => { setRejectionReason(''); setShowRejectModal(true); }}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-sm transition-all flex items-center gap-1.5"
+              >
+                <XCircle className="w-4 h-4" /> Reject (Rework)
+              </button>
+            </div>
+          </div>
+
+          {/* Verification Checklist */}
+          {repairValidation && !repairValidation.isValid && (
+            <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 space-y-1.5">
+              <div className="flex items-center gap-1.5 font-bold text-xs text-amber-800">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>Approval Blocked — Mandatory Repair Documentation Incomplete</span>
+              </div>
+              <p className="text-[11px] text-amber-700">
+                Closure cannot be approved until all mandatory repair evidence is provided:
+              </p>
+              <ul className="list-disc list-inside space-y-0.5 text-[11px] text-amber-800 font-semibold pl-1">
+                {repairValidation.missingFields.map((field: string, idx: number) => (
+                  <li key={idx}>{field}</li>
+                ))}
+              </ul>
+              <p className="text-[10px] text-amber-600 italic">
+                Field staff must log complete details and photos, or click "Reject (Rework)" to return it for remediation.
               </p>
             </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={() => { setApprovalNotes(''); setShowApproveModal(true); }}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-sm transition-all flex items-center gap-1.5"
-            >
-              <ShieldCheck className="w-4 h-4" /> Approve Resolution
-            </button>
-            <button
-              onClick={() => { setRejectionReason(''); setShowRejectModal(true); }}
-              className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-sm transition-all flex items-center gap-1.5"
-            >
-              <XCircle className="w-4 h-4" /> Reject (Rework)
-            </button>
-          </div>
+          )}
         </div>
       )}
 
@@ -745,6 +790,43 @@ export const IssueDetailPage: React.FC = () => {
               <p className="font-semibold text-slate-900">{issue.title}</p>
               <p className="text-slate-500 text-[11px]">{issue.address}</p>
             </div>
+
+            {repairValidation && !repairValidation.isValid && (
+              <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 space-y-1.5 mb-3">
+                <div className="flex items-center gap-1.5 font-bold text-xs text-rose-900">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>Approval Blocked: Incomplete Repair Documentation</span>
+                </div>
+                <p className="text-[11px] text-rose-700">
+                  The repair record is missing mandatory information or evidence required for verification:
+                </p>
+                <ul className="list-disc list-inside space-y-0.5 text-[11px] text-rose-800 font-semibold pl-1">
+                  {repairValidation.missingFields.map((field: string, idx: number) => (
+                    <li key={idx}>{field}</li>
+                  ))}
+                </ul>
+                <p className="text-[10px] text-rose-600 italic">
+                  To return this issue to field staff for rework, cancel and click "Reject (Rework)".
+                </p>
+              </div>
+            )}
+
+            {approvalError && (
+              <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 space-y-1.5 mb-3">
+                <div className="flex items-center gap-1.5 font-bold text-xs text-rose-900">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{approvalError}</span>
+                </div>
+                {approvalMissingFields.length > 0 && (
+                  <ul className="list-disc list-inside space-y-0.5 text-[11px] text-rose-800 font-semibold pl-1">
+                    {approvalMissingFields.map((field, idx) => (
+                      <li key={idx}>{field}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
             <form onSubmit={handleApprove} className="space-y-4">
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">
@@ -768,8 +850,12 @@ export const IssueDetailPage: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={approving}
-                  className="px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition-colors shadow-sm flex items-center gap-1.5"
+                  disabled={approving || (repairValidation && !repairValidation.isValid)}
+                  className={`px-4 py-2 rounded-xl font-bold transition-colors shadow-sm flex items-center gap-1.5 ${
+                    approving || (repairValidation && !repairValidation.isValid)
+                      ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                      : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                  }`}
                 >
                   <ShieldCheck className="w-4 h-4" />
                   <span>{approving ? 'Approving...' : 'Confirm Approval & Close'}</span>
@@ -906,6 +992,8 @@ export const IssueDetailPage: React.FC = () => {
           assetName={issue.asset_name || issue.title}
           sharedIssueId={issue.id}
           incidentId={issue.incident_id || null}
+          originalEvidenceImage={issue.primary_image || (citizenReports && citizenReports[0]?.evidence_image) || null}
+          citizenEvidenceImages={images ? images.filter((img: any) => img.image_type === 'evidence').map((img: any) => img.image_url) : []}
           onSuccess={async () => {
             setShowRepairModal(false);
             await loadIssue();

@@ -18,6 +18,7 @@ import {
 import { authenticateToken, requireRole, optionalAuth } from '../middleware/auth.js';
 import { calculateDistanceMeters } from '../utils/duplicateDetector.js';
 import { calculateInfrastructureRisk } from '../utils/riskPredictor.js';
+import { validateRepairForApproval } from '../utils/repairValidator.js';
 
 const router = express.Router();
 
@@ -291,8 +292,14 @@ router.get('/:id', optionalAuth, async (req, res) => {
       rejected_by_name: rejecter ? rejecter.name : null
     };
 
+    const repairValidation = await validateRepairForApproval(issue);
+
     res.json({
       issue: formattedIssue,
+      repairValidation: {
+        isValid: repairValidation.isValid,
+        missingFields: repairValidation.missingFields || []
+      },
       citizenReports: formattedReports,
       images: images.map((img) => ({ ...img.toJSON(), id: img._id.toString() })),
       history: formattedHistory,
@@ -339,6 +346,18 @@ router.patch('/:id/status', authenticateToken, requireRole('admin', 'department_
       return res.status(403).json({
         error: 'Access denied. Only administrators can approve or reject issue resolutions.'
       });
+    }
+
+    // Validation check: Admin approval requires a complete, verified repair record
+    if (normalizedStatus === 'Approved') {
+      const validation = await validateRepairForApproval(currentIssue);
+      if (!validation.isValid) {
+        return res.status(400).json({
+          error: validation.message,
+          missingFields: validation.missingFields,
+          details: `Missing requirements: ${validation.missingFields.join('; ')}`
+        });
+      }
     }
 
     // Role check: Department staff can only update issues belonging to their assigned department
@@ -462,6 +481,16 @@ router.post('/:id/approve', authenticateToken, requireRole('admin'), async (req,
     const currentIssue = await findIssue(req.params.id);
     if (!currentIssue) {
       return res.status(404).json({ error: 'Shared issue not found.' });
+    }
+
+    // Validation check: Admin approval requires a complete, verified repair record
+    const validation = await validateRepairForApproval(currentIssue);
+    if (!validation.isValid) {
+      return res.status(400).json({
+        error: validation.message,
+        missingFields: validation.missingFields,
+        details: `Missing requirements: ${validation.missingFields.join('; ')}`
+      });
     }
 
     const oldStatus = currentIssue.status;

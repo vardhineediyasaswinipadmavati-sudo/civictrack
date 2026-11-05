@@ -330,6 +330,7 @@ export const StaffDashboard: React.FC = () => {
           assetName={activeRepairIssue.asset_name || activeRepairIssue.title}
           sharedIssueId={activeRepairIssue.id}
           incidentId={activeRepairIssue.incident_id || null}
+          originalEvidenceImage={activeRepairIssue.primary_image || null}
           onSuccess={async () => {
             setActiveRepairIssue(null);
             await loadData();
