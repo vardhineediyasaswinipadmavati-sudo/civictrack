@@ -6,6 +6,8 @@ import { SharedIssue, CitizenReport, ReportImage, StatusHistoryItem, RepairRecor
 import { StatusBadge } from '../components/StatusBadge';
 import { PriorityBadge } from '../components/PriorityBadge';
 import { MergeIssuesModal } from '../components/MergeIssuesModal';
+import { AssociateAssetModal } from '../components/AssociateAssetModal';
+import { RecordRepairModal } from '../components/RecordRepairModal';
 import { formatINR } from '../utils/currency';
 import {
   MapPin,
@@ -51,6 +53,8 @@ export const IssueDetailPage: React.FC = () => {
   const [reopenReason, setReopenReason] = useState('');
   const [showReopenModal, setShowReopenModal] = useState(false);
   const [showMergeModal, setShowMergeModal] = useState(false);
+  const [showAssociateModal, setShowAssociateModal] = useState(false);
+  const [showRepairModal, setShowRepairModal] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [feedback, setFeedback] = useState('');
 
@@ -189,6 +193,27 @@ export const IssueDetailPage: React.FC = () => {
               </button>
             )}
 
+            {/* Staff / Admin Complete Repair Action */}
+            {(user?.role === 'admin' || user?.role === 'department_staff') && issue.status !== 'Resolved' && (
+              <button
+                onClick={() => setShowRepairModal(true)}
+                className="px-3.5 py-1.5 rounded-xl bg-civic-600 hover:bg-civic-700 text-white font-bold text-xs shadow-sm transition-all flex items-center gap-1.5"
+              >
+                <Wrench className="w-4 h-4" /> Complete Repair
+              </button>
+            )}
+
+            {/* Admin Associate Asset Action */}
+            {user?.role === 'admin' && (
+              <button
+                onClick={() => setShowAssociateModal(true)}
+                className="px-3.5 py-1.5 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 text-xs font-bold transition-colors flex items-center gap-1.5"
+                title="Associate or reassign infrastructure asset"
+              >
+                <Building2 className="w-4 h-4" /> {issue.infrastructure_id ? 'Change Asset' : 'Associate Asset'}
+              </button>
+            )}
+
             {/* Admin Merge Action */}
             {user?.role === 'admin' && (
               <button
@@ -246,7 +271,17 @@ export const IssueDetailPage: React.FC = () => {
           </div>
 
           <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
-            <span className="text-slate-500 font-medium">Infrastructure Asset</span>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-500 font-medium">Infrastructure Asset</span>
+              {user?.role === 'admin' && (
+                <button
+                  onClick={() => setShowAssociateModal(true)}
+                  className="text-[11px] font-bold text-civic-600 hover:text-civic-800 hover:underline"
+                >
+                  {issue.asset_code ? 'Change' : '+ Link Asset'}
+                </button>
+              )}
+            </div>
             {issue.asset_code ? (
               <Link to={`/infrastructure/${issue.infrastructure_id}`} className="mt-1 block font-mono font-bold text-civic-700 hover:underline">
                 {issue.asset_code} ({issue.asset_name})
@@ -556,6 +591,33 @@ export const IssueDetailPage: React.FC = () => {
             await loadIssue();
           }}
           onClose={() => setShowMergeModal(false)}
+        />
+      )}
+
+      {/* Admin Associate Asset Modal */}
+      {showAssociateModal && (
+        <AssociateAssetModal
+          issue={issue}
+          onSuccess={async () => {
+            setShowAssociateModal(false);
+            await loadIssue();
+          }}
+          onClose={() => setShowAssociateModal(false)}
+        />
+      )}
+
+      {/* Staff / Admin Record Repair Modal */}
+      {showRepairModal && (
+        <RecordRepairModal
+          assetId={issue.infrastructure_id || null}
+          assetName={issue.asset_name || issue.title}
+          sharedIssueId={issue.id}
+          incidentId={issue.incident_id || null}
+          onSuccess={async () => {
+            setShowRepairModal(false);
+            await loadIssue();
+          }}
+          onClose={() => setShowRepairModal(false)}
         />
       )}
     </div>

@@ -302,6 +302,25 @@ export const api = {
     return handleResponse(res);
   },
 
+  async associateIssueAsset(issueId: number | string, assetId: number | string): Promise<{
+    message: string;
+    issueId: string;
+    issueCode: string;
+    assetId: string;
+    assetCode: string;
+    assetName: string;
+    assetCategory: string;
+    assetHealthStatus: string;
+    assetRiskScore: number;
+  }> {
+    const res = await fetch(`${API_BASE}/issues/${issueId}/associate-asset`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ asset_id: assetId })
+    });
+    return handleResponse(res);
+  },
+
   // Infrastructure
   async getInfrastructure(params?: { category?: string; health_status?: string; risk_level?: string; search?: string }): Promise<InfrastructureAsset[]> {
     const searchParams = new URLSearchParams();
@@ -311,6 +330,25 @@ export const api = {
     if (params?.search) searchParams.set('search', params.search);
 
     const res = await fetch(`${API_BASE}/infrastructure?${searchParams.toString()}`);
+    return handleResponse(res);
+  },
+
+  async createInfrastructureAsset(data: {
+    asset_code?: string;
+    name: string;
+    category: string;
+    latitude: number;
+    longitude: number;
+    address: string;
+    department_id?: string | number | null;
+    installation_date?: string;
+    description?: string;
+  }): Promise<{ message: string; assetId: string; asset_code?: string; asset: InfrastructureAsset }> {
+    const res = await fetch(`${API_BASE}/infrastructure`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data)
+    });
     return handleResponse(res);
   },
 
@@ -333,7 +371,7 @@ export const api = {
     return handleResponse(res);
   },
 
-  async recordRepair(assetId: number | string, data: {
+  async recordRepair(assetId: number | string | null | undefined, data: {
     shared_issue_id?: string | number | null;
     incident_id?: string | number | null;
     department_id?: string | number;
@@ -345,7 +383,8 @@ export const api = {
     before_image_url?: string;
     after_image_url?: string;
   }): Promise<any> {
-    const res = await fetch(`${API_BASE}/infrastructure/${assetId}/repairs`, {
+    const url = assetId ? `${API_BASE}/infrastructure/${assetId}/repairs` : `${API_BASE}/infrastructure/repairs`;
+    const res = await fetch(url, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify(data)

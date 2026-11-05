@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { InfrastructureAsset } from '../types';
 import { RiskBadge, HealthStatusBadge } from '../components/RiskBadge';
+import { CreateAssetModal } from '../components/CreateAssetModal';
 import {
   Building2,
   MapPin,
@@ -12,27 +14,31 @@ import {
   ShieldAlert,
   Wrench,
   History,
-  Activity
+  Activity,
+  Plus
 } from 'lucide-react';
 
 export const InfrastructureListPage: React.FC = () => {
+  const { user } = useAuth();
   const [assets, setAssets] = useState<InfrastructureAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [healthFilter, setHealthFilter] = useState('');
+  const [showCreateModal, setShowCreateModal] = useState(false);
+
+  const loadAssets = async () => {
+    try {
+      const data = await api.getInfrastructure();
+      setAssets(data);
+    } catch (err) {
+      console.error('Failed to load infrastructure assets', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    async function loadAssets() {
-      try {
-        const data = await api.getInfrastructure();
-        setAssets(data);
-      } catch (err) {
-        console.error('Failed to load infrastructure assets', err);
-      } finally {
-        setLoading(false);
-      }
-    }
     loadAssets();
   }, []);
 
@@ -73,12 +79,23 @@ export const InfrastructureListPage: React.FC = () => {
           </p>
         </div>
 
-        <Link
-          to="/map"
-          className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-civic-600 hover:bg-civic-700 text-white font-bold text-xs shadow-sm"
-        >
-          <Activity className="w-4 h-4" /> View on GIS Health Map
-        </Link>
+        <div className="flex items-center gap-2.5">
+          {user?.role === 'admin' && (
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-sm transition-all"
+            >
+              <Plus className="w-4 h-4" /> Create New Asset
+            </button>
+          )}
+
+          <Link
+            to="/map"
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-civic-600 hover:bg-civic-700 text-white font-bold text-xs shadow-sm"
+          >
+            <Activity className="w-4 h-4" /> View on GIS Health Map
+          </Link>
+        </div>
       </div>
 
       {/* Filter Bar */}
@@ -224,6 +241,17 @@ export const InfrastructureListPage: React.FC = () => {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Create New Asset Modal (Admin Only) */}
+      {showCreateModal && (
+        <CreateAssetModal
+          onSuccess={async () => {
+            setShowCreateModal(false);
+            await loadAssets();
+          }}
+          onClose={() => setShowCreateModal(false)}
+        />
       )}
     </div>
   );

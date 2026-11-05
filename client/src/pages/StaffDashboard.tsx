@@ -326,8 +326,8 @@ export const StaffDashboard: React.FC = () => {
       {/* Record Repair Modal */}
       {activeRepairIssue && (
         <RecordRepairModal
-          assetId={activeRepairIssue.infrastructure_id || 1}
-          assetName={activeRepairIssue.title}
+          assetId={activeRepairIssue.infrastructure_id || null}
+          assetName={activeRepairIssue.asset_name || activeRepairIssue.title}
           sharedIssueId={activeRepairIssue.id}
           incidentId={activeRepairIssue.incident_id || null}
           onSuccess={async () => {

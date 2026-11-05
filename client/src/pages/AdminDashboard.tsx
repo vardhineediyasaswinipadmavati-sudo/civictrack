@@ -6,6 +6,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import { PriorityBadge } from '../components/PriorityBadge';
 import { MergeIssuesModal } from '../components/MergeIssuesModal';
 import { ProvisionUserModal } from '../components/ProvisionUserModal';
+import { AssociateAssetModal } from '../components/AssociateAssetModal';
 import {
   ShieldAlert,
   GitMerge,
@@ -45,6 +46,7 @@ export const AdminDashboard: React.FC = () => {
 
   // Modals
   const [mergeTarget, setMergeTarget] = useState<SharedIssue | null>(null);
+  const [associateTarget, setAssociateTarget] = useState<SharedIssue | null>(null);
   const [assignIssue, setAssignIssue] = useState<SharedIssue | null>(null);
   const [assignDeptId, setAssignDeptId] = useState<string | number | ''>('');
   const [assigning, setAssigning] = useState(false);
@@ -380,6 +382,13 @@ export const AdminDashboard: React.FC = () => {
                               <UserCheck className="w-4 h-4" />
                             </button>
                             <button
+                              onClick={() => setAssociateTarget(issue)}
+                              className="p-1.5 text-slate-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors"
+                              title={issue.infrastructure_id ? `Linked to ${issue.asset_code || 'Asset'} (Click to change)` : 'Associate with Infrastructure Asset'}
+                            >
+                              <Building2 className="w-4 h-4" />
+                            </button>
+                            <button
                               onClick={() => setMergeTarget(issue)}
                               className="p-1.5 text-slate-600 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition-colors"
                               title="Merge duplicate into this issue"
@@ -548,6 +557,18 @@ export const AdminDashboard: React.FC = () => {
             await loadData();
           }}
           onClose={() => setMergeTarget(null)}
+        />
+      )}
+
+      {/* Associate Asset Modal */}
+      {associateTarget && (
+        <AssociateAssetModal
+          issue={associateTarget}
+          onSuccess={async () => {
+            setAssociateTarget(null);
+            await loadData();
+          }}
+          onClose={() => setAssociateTarget(null)}
         />
       )}
 

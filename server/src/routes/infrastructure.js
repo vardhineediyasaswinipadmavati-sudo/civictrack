@@ -93,36 +93,134 @@ router.get('/', async (req, res) => {
   }
 });
 
+function getAssetCodePrefix(category) {
+  const cat = (category || '').toLowerCase();
+  if (cat.includes('road') || cat.includes('pothole')) return 'AST-RD-';
+  if (cat.includes('light') || cat.includes('electr')) return 'AST-SL-';
+  if (cat.includes('drain') || cat.includes('sewag')) return 'AST-DR-';
+  if (cat.includes('water')) return 'AST-WS-';
+  if (cat.includes('build') || cat.includes('facil') || cat.includes('struct')) return 'AST-PB-';
+  if (cat.includes('garb') || cat.includes('sanit') || cat.includes('waste')) return 'AST-SN-';
+  if (cat.includes('park')) return 'AST-PK-';
+  return 'AST-GEN-';
+}
+
+function getDeptCodeForCategory(category) {
+  const cat = (category || '').toLowerCase();
+  if (cat.includes('road') || cat.includes('pothole')) return 'ROADS';
+  if (cat.includes('light') || cat.includes('electr')) return 'ELECTRICAL';
+  if (cat.includes('water') || cat.includes('drain') || cat.includes('sewag')) return 'WATER';
+  if (cat.includes('garb') || cat.includes('sanit')) return 'SANITATION';
+  if (cat.includes('build') || cat.includes('facil')) return 'FACILITIES';
+  return 'ROADS';
+}
+
+async function generateUniqueAssetCode(category) {
+  const prefix = getAssetCodePrefix(category);
+  let isUnique = false;
+  let code = '';
+  let attempt = 0;
+  while (!isUnique && attempt < 50) {
+    attempt++;
+    const num = Math.floor(100 + Math.random() * 900);
+    code = `${prefix}${num}`;
+    const existing = await InfrastructureAsset.findOne({ asset_code: code });
+    if (!existing) {
+      isUnique = true;
+    }
+  }
+  return code;
+}
+
 // 2. Create new infrastructure asset (Admin only)
 router.post('/', authenticateToken, requireRole('admin'), async (req, res) => {
   try {
-    const { asset_code, name, category, latitude, longitude, address, installation_date } = req.body;
+    const { asset_code, name, category, latitude, longitude, address, department_id, installation_date, description } = req.body;
 
-    if (!asset_code || !name || !category || latitude === undefined || longitude === undefined) {
-      return res.status(400).json({ error: 'Asset code, name, category, latitude, and longitude are required.' });
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Asset name is required.' });
+    }
+    if (!category || !category.trim()) {
+      return res.status(400).json({ error: 'Asset category is required.' });
+    }
+    if (latitude === undefined || latitude === null || isNaN(Number(latitude))) {
+      return res.status(400).json({ error: 'Valid latitude coordinate is required.' });
+    }
+    if (longitude === undefined || longitude === null || isNaN(Number(longitude))) {
+      return res.status(400).json({ error: 'Valid longitude coordinate is required.' });
+    }
+    if (!address || !address.trim()) {
+      return res.status(400).json({ error: 'Address/location is required.' });
     }
 
-    const trimmedCode = asset_code.trim().toUpperCase();
-    const existing = await InfrastructureAsset.findOne({ asset_code: trimmedCode });
-    if (existing) {
-      return res.status(409).json({ error: 'An asset with this code already exists.' });
+    const trimmedName = name.trim();
+
+    // Prevent accidental duplicate assets with the same name in the same category
+    const duplicateAsset = await InfrastructureAsset.findOne({
+      name: new RegExp(`^${trimmedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
+      category: category.trim()
+    });
+    if (duplicateAsset) {
+      return res.status(409).json({
+        error: `An asset named "${duplicateAsset.name}" is already registered in category "${duplicateAsset.category}" (${duplicateAsset.asset_code}).`
+      });
+    }
+
+    // Resolve or generate unique asset code
+    let finalCode = '';
+    if (asset_code && asset_code.trim()) {
+      finalCode = asset_code.trim().toUpperCase();
+      const existingCode = await InfrastructureAsset.findOne({ asset_code: finalCode });
+      if (existingCode) {
+        return res.status(409).json({ error: `An asset with code "${finalCode}" already exists.` });
+      }
+    } else {
+      finalCode = await generateUniqueAssetCode(category.trim());
+    }
+
+    // Resolve responsible department
+    let resolvedDeptId = null;
+    if (department_id) {
+      if (mongoose.Types.ObjectId.isValid(department_id)) {
+        const dept = await Department.findById(department_id);
+        if (dept) resolvedDeptId = dept._id;
+      }
+    }
+    if (!resolvedDeptId) {
+      const targetDeptCode = getDeptCodeForCategory(category.trim());
+      const defaultDept = (await Department.findOne({ code: targetDeptCode })) || (await Department.findOne());
+      if (defaultDept) resolvedDeptId = defaultDept._id;
+    }
+
+    const reasons = [];
+    if (description && description.trim()) {
+      reasons.push(description.trim());
+    } else {
+      reasons.push('Newly registered municipal infrastructure asset');
     }
 
     const newAsset = await InfrastructureAsset.create({
-      asset_code: trimmedCode,
-      name: name.trim(),
-      category,
+      asset_code: finalCode,
+      name: trimmedName,
+      category: category.trim(),
       latitude: Number(latitude),
       longitude: Number(longitude),
-      address: address || 'Recorded Location',
+      address: address.trim(),
+      department_id: resolvedDeptId,
       installation_date: installation_date || new Date().toISOString().split('T')[0],
       current_health_status: 'good',
       risk_score: 10,
       risk_level: 'Low',
-      risk_reasons: ['Newly commissioned infrastructure asset']
+      risk_reasons: reasons,
+      is_demo: false
     });
 
-    res.status(201).json({ message: 'Infrastructure asset created.', assetId: newAsset._id.toString() });
+    res.status(201).json({
+      message: 'Infrastructure asset created successfully.',
+      assetId: newAsset._id.toString(),
+      asset_code: newAsset.asset_code,
+      asset: newAsset
+    });
   } catch (err) {
     console.error('Create asset error:', err);
     res.status(500).json({ error: 'Failed to create infrastructure asset.' });
@@ -288,11 +386,15 @@ router.get('/:id', async (req, res) => {
 });
 
 // 4. Record a Repair (Staff or Admin - Feature 4)
-router.post('/:id/repairs', authenticateToken, requireRole('admin', 'department_staff'), async (req, res) => {
+// Optional infrastructure asset association: If unlinked or asset missing, saves against the complaint itself
+async function handleRecordRepair(req, res) {
   try {
-    const asset = await findAsset(req.params.id);
-    if (!asset) {
-      return res.status(404).json({ error: 'Infrastructure asset not found.' });
+    const assetParam = req.params.id;
+    let asset = null;
+    const isSpecialParam = !assetParam || assetParam === 'none' || assetParam === 'unlinked' || assetParam === 'null' || assetParam === 'undefined';
+
+    if (!isSpecialParam) {
+      asset = await findAsset(assetParam);
     }
 
     const {
@@ -308,29 +410,41 @@ router.post('/:id/repairs', authenticateToken, requireRole('admin', 'department_
       after_image_url
     } = req.body;
 
+    let resolvedIssue = null;
+    let resolvedIssueId = null;
+    if (shared_issue_id) {
+      if (mongoose.Types.ObjectId.isValid(shared_issue_id)) {
+        resolvedIssue = await SharedIssue.findById(shared_issue_id);
+      } else {
+        resolvedIssue = await SharedIssue.findOne({ legacy_id: Number(shared_issue_id) });
+      }
+      if (resolvedIssue) {
+        resolvedIssueId = resolvedIssue._id;
+        // If asset was not resolved from URL parameter, check if the issue itself has a linked asset
+        if (!asset && resolvedIssue.infrastructure_id) {
+          asset = await InfrastructureAsset.findById(resolvedIssue.infrastructure_id);
+        }
+      }
+    }
+
+    // Require at least a valid complaint issue or infrastructure asset to anchor the repair
+    if (!asset && !resolvedIssue) {
+      return res.status(400).json({ error: 'A valid complaint issue or infrastructure asset is required to record a repair.' });
+    }
+
     const validRepairTypes = ['temporary', 'permanent', 'inspection_only', 'no_fault'];
     if (!repair_type || !validRepairTypes.includes(repair_type)) {
       return res.status(400).json({ error: `Invalid repair type. Must be one of: ${validRepairTypes.join(', ')}` });
     }
 
     if (!work_summary || work_summary.trim().length < 5) {
-      return res.status(400).json({ error: 'A clear work summary is required.' });
+      return res.status(400).json({ error: 'A clear work summary (at least 5 characters) is required.' });
     }
 
-    let resolvedDeptId = req.user.department_id || department_id;
+    let resolvedDeptId = req.user.department_id || department_id || (resolvedIssue ? resolvedIssue.department_id : null);
     if (!resolvedDeptId) {
       const firstDept = await Department.findOne();
       resolvedDeptId = firstDept ? firstDept._id : null;
-    }
-
-    let resolvedIssueId = null;
-    if (shared_issue_id) {
-      if (mongoose.Types.ObjectId.isValid(shared_issue_id)) {
-        resolvedIssueId = shared_issue_id;
-      } else {
-        const issueDoc = await SharedIssue.findOne({ legacy_id: Number(shared_issue_id) });
-        if (issueDoc) resolvedIssueId = issueDoc._id;
-      }
     }
 
     const repairCode = `REP-REC-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -338,8 +452,8 @@ router.post('/:id/repairs', authenticateToken, requireRole('admin', 'department_
 
     const newRepair = await RepairRecord.create({
       repair_code: repairCode,
-      infrastructure_id: asset._id,
-      incident_id: incident_id || null,
+      infrastructure_id: asset ? asset._id : null,
+      incident_id: incident_id || (resolvedIssue ? resolvedIssue.incident_id : null) || null,
       shared_issue_id: resolvedIssueId,
       repaired_by_user_id: req.user.id,
       department_id: resolvedDeptId,
@@ -371,73 +485,81 @@ router.post('/:id/repairs', authenticateToken, requireRole('admin', 'department_
     }
 
     // If linked to shared issue, transition issue to Resolved with resolutionType
-    if (resolvedIssueId) {
-      const issue = await SharedIssue.findById(resolvedIssueId);
-      if (issue) {
-        issue.status = 'Resolved';
-        issue.resolved_at = now;
-        issue.resolution_type = repair_type;
-        issue.resolution_notes = work_summary.trim();
-        issue.updated_at = now;
-        await issue.save();
+    if (resolvedIssue) {
+      resolvedIssue.status = 'Resolved';
+      resolvedIssue.resolved_at = now;
+      resolvedIssue.resolution_type = repair_type;
+      resolvedIssue.resolution_notes = work_summary.trim();
+      resolvedIssue.updated_at = now;
+      await resolvedIssue.save();
 
-        await CitizenReport.updateMany({ shared_issue_id: resolvedIssueId }, { status: 'Resolved' });
+      await CitizenReport.updateMany({ shared_issue_id: resolvedIssue._id }, { status: 'Resolved' });
 
-        await StatusHistory.create({
-          shared_issue_id: resolvedIssueId,
-          old_status: 'In Progress',
-          new_status: 'Resolved',
-          changed_by_user_id: req.user.id,
-          comments: `Repair completed (${repair_type}): ${work_summary.trim()}`
+      await StatusHistory.create({
+        shared_issue_id: resolvedIssue._id,
+        old_status: 'In Progress',
+        new_status: 'Resolved',
+        changed_by_user_id: req.user.id,
+        comments: `Repair completed (${repair_type}): ${work_summary.trim()}`
+      });
+
+      // Notify linked citizens
+      const reporters = await CitizenReport.find({ shared_issue_id: resolvedIssue._id }).distinct('user_id');
+      for (const uId of reporters) {
+        await Notification.create({
+          user_id: uId,
+          title: 'Repair Completed',
+          message: `Work has been completed on your reported issue (${repair_type}). Please help verify if the repair is effective!`,
+          link_url: `/issues/${resolvedIssue._id.toString()}`,
+          is_read: false
         });
-
-        // Notify linked citizens
-        const reporters = await CitizenReport.find({ shared_issue_id: resolvedIssueId }).distinct('user_id');
-        for (const uId of reporters) {
-          await Notification.create({
-            user_id: uId,
-            title: 'Repair Completed',
-            message: `Work has been completed on your reported issue (${repair_type}). Please help verify if the repair is effective!`,
-            link_url: `/issues/${resolvedIssueId.toString()}`,
-            is_read: false
-          });
-        }
       }
     }
 
-    // Recalculate asset risk score & health status
-    const allIncidents = await InfrastructureIncident.find({ infrastructure_id: asset._id });
-    const allRepairs = await RepairRecord.find({ infrastructure_id: asset._id });
-    const openCount = await SharedIssue.countDocuments({
-      infrastructure_id: asset._id,
-      status: { $ne: 'Resolved' }
-    });
+    // Recalculate asset risk score & health status only if an asset is associated
+    let updatedHealthStatus = null;
+    let updatedRiskScore = null;
+    if (asset) {
+      const allIncidents = await InfrastructureIncident.find({ infrastructure_id: asset._id });
+      const allRepairs = await RepairRecord.find({ infrastructure_id: asset._id });
+      const openCount = await SharedIssue.countDocuments({
+        infrastructure_id: asset._id,
+        status: { $ne: 'Resolved' }
+      });
 
-    const updatedRisk = calculateInfrastructureRisk({
-      asset,
-      distinctIncidents: allIncidents,
-      repairRecords: allRepairs,
-      unresolvedIssuesCount: openCount
-    });
+      const updatedRisk = calculateInfrastructureRisk({
+        asset,
+        distinctIncidents: allIncidents,
+        repairRecords: allRepairs,
+        unresolvedIssuesCount: openCount
+      });
 
-    asset.current_health_status = updatedRisk.healthStatus;
-    asset.risk_score = updatedRisk.riskScore;
-    asset.risk_level = updatedRisk.riskLevel;
-    asset.risk_reasons = updatedRisk.reasons;
-    asset.last_inspected_at = now;
-    await asset.save();
+      asset.current_health_status = updatedRisk.healthStatus;
+      asset.risk_score = updatedRisk.riskScore;
+      asset.risk_level = updatedRisk.riskLevel;
+      asset.risk_reasons = updatedRisk.reasons;
+      asset.last_inspected_at = now;
+      await asset.save();
+
+      updatedHealthStatus = updatedRisk.healthStatus;
+      updatedRiskScore = updatedRisk.riskScore;
+    }
 
     res.status(201).json({
       message: 'Repair record logged successfully.',
       repairId: newRepair._id.toString(),
       repairCode,
-      updatedHealthStatus: updatedRisk.healthStatus,
-      updatedRiskScore: updatedRisk.riskScore
+      assetLinked: Boolean(asset),
+      updatedHealthStatus,
+      updatedRiskScore
     });
   } catch (err) {
     console.error('Record repair error:', err);
     res.status(500).json({ error: 'Failed to record repair.' });
   }
-});
+}
+
+router.post('/repairs', authenticateToken, requireRole('admin', 'department_staff'), handleRecordRepair);
+router.post('/:id/repairs', authenticateToken, requireRole('admin', 'department_staff'), handleRecordRepair);
 
 export default router;

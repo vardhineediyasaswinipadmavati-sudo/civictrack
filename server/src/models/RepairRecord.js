@@ -13,7 +13,7 @@ const repairRecordSchema = new mongoose.Schema(
     infrastructure_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'InfrastructureAsset',
-      required: true,
+      default: null,
       index: true
     },
     incident_id: {

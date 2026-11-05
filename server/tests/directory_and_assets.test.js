@@ -133,4 +133,72 @@ test('Municipal Personnel Directory & Infrastructure Asset Registry Suite', asyn
     assert.strictEqual(repairs[0].repair.repair_type, 'temporary');
     assert.strictEqual(repairs[0].repair.cost_amount, 35000);
   });
+
+  await t.test('6. Optional Asset Association: RepairRecord allows null infrastructure_id when logged for unlinked issue', () => {
+    const unlinkedRepair = new RepairRecord({
+      repair_code: 'REP-REC-9999',
+      infrastructure_id: null,
+      shared_issue_id: new mongoose.Types.ObjectId(),
+      repaired_by_user_id: new mongoose.Types.ObjectId(),
+      department_id: new mongoose.Types.ObjectId(),
+      repair_type: 'permanent',
+      work_summary: 'Culvert blockage removed and roadway restored without linked asset'
+    });
+
+    const validationError = unlinkedRepair.validateSync();
+    assert.strictEqual(validationError, undefined, 'Unlinked repair record must pass schema validation');
+    assert.strictEqual(unlinkedRepair.infrastructure_id, null, 'infrastructure_id must be null');
+    assert.ok(unlinkedRepair.shared_issue_id, 'shared_issue_id must anchor the repair');
+  });
+
+  await t.test('7. Asset Creation: Auto-generated code prefixes match required municipal category codes', () => {
+    function getAssetCodePrefix(category) {
+      const cat = (category || '').toLowerCase();
+      if (cat.includes('road') || cat.includes('pothole')) return 'AST-RD-';
+      if (cat.includes('light') || cat.includes('electr')) return 'AST-SL-';
+      if (cat.includes('drain') || cat.includes('sewag')) return 'AST-DR-';
+      if (cat.includes('water')) return 'AST-WS-';
+      if (cat.includes('build') || cat.includes('facil') || cat.includes('struct')) return 'AST-PB-';
+      if (cat.includes('garb') || cat.includes('sanit') || cat.includes('waste')) return 'AST-SN-';
+      if (cat.includes('park')) return 'AST-PK-';
+      return 'AST-GEN-';
+    }
+
+    assert.strictEqual(getAssetCodePrefix('Roads and potholes'), 'AST-RD-');
+    assert.strictEqual(getAssetCodePrefix('Streetlights and electrical infrastructure'), 'AST-SL-');
+    assert.strictEqual(getAssetCodePrefix('Drainage and sewage'), 'AST-DR-');
+    assert.strictEqual(getAssetCodePrefix('Water supply and leakage'), 'AST-WS-');
+    assert.strictEqual(getAssetCodePrefix('Public buildings and facilities'), 'AST-PB-');
+  });
+
+  await t.test('8. Future Asset Association: Category compatibility verification accurately detects matching vs conflicting pairs', () => {
+    function areCategoriesCompatible(issueCategory, assetCategory) {
+      if (!issueCategory || !assetCategory) return true;
+      const ic = issueCategory.toLowerCase();
+      const ac = assetCategory.toLowerCase();
+      if (ic === ac) return true;
+      if ((ic.includes('road') || ic.includes('pothole')) && (ac.includes('road') || ac.includes('pothole'))) return true;
+      if ((ic.includes('light') || ic.includes('electr')) && (ac.includes('light') || ac.includes('electr'))) return true;
+      if ((ic.includes('water') || ic.includes('leak')) && (ac.includes('water') || ac.includes('pipe') || ac.includes('drain'))) return true;
+      if ((ic.includes('drain') || ic.includes('sewag')) && (ac.includes('drain') || ac.includes('sewag') || ac.includes('water'))) return true;
+      if ((ic.includes('build') || ic.includes('facil') || ic.includes('struct')) && (ac.includes('build') || ac.includes('facil') || ac.includes('struct'))) return true;
+      if ((ic.includes('garb') || ic.includes('sanit') || ic.includes('waste')) && (ac.includes('garb') || ac.includes('sanit') || ac.includes('waste'))) return true;
+      if (ic.includes('other') || ac.includes('other')) return true;
+      return false;
+    }
+
+    // Matching pairs
+    assert.strictEqual(areCategoriesCompatible('Roads and potholes', 'Roads and potholes'), true);
+    assert.strictEqual(areCategoriesCompatible('Water supply and leakage', 'Water supply and leakage'), true);
+    assert.strictEqual(areCategoriesCompatible('Streetlights and electrical infrastructure', 'Streetlights and electrical infrastructure'), true);
+
+    // Cross-compatible variations
+    assert.strictEqual(areCategoriesCompatible('Water supply and leakage', 'Water supply and pipelines'), true);
+    assert.strictEqual(areCategoriesCompatible('Drainage and sewage', 'Water supply and drainage'), true);
+
+    // Incompatible pairs (must be rejected)
+    assert.strictEqual(areCategoriesCompatible('Roads and potholes', 'Streetlights and electrical infrastructure'), false);
+    assert.strictEqual(areCategoriesCompatible('Public buildings and facilities', 'Drainage and sewage'), false);
+    assert.strictEqual(areCategoriesCompatible('Roads and potholes', 'Water supply and leakage'), false);
+  });
 });

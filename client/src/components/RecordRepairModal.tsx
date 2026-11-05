@@ -3,8 +3,8 @@ import { api } from '../services/api';
 import { Wrench, DollarSign, Camera, Check, X, AlertCircle } from 'lucide-react';
 
 interface Props {
-  assetId: number | string;
-  assetName: string;
+  assetId?: number | string | null;
+  assetName?: string;
   sharedIssueId?: number | string | null;
   incidentId?: number | string | null;
   onSuccess: () => void;
@@ -54,7 +54,7 @@ export const RecordRepairModal: React.FC<Props> = ({
     setSubmitting(true);
     setError(null);
     try {
-      await api.recordRepair(assetId, {
+      await api.recordRepair(assetId || null, {
         shared_issue_id: sharedIssueId || null,
         incident_id: incidentId || null,
         repair_type: repairType,
@@ -84,7 +84,9 @@ export const RecordRepairModal: React.FC<Props> = ({
             </div>
             <div>
               <h3 className="font-bold text-sm">Log Work & Repair Details</h3>
-              <p className="text-xs text-slate-400 truncate max-w-sm">{assetName}</p>
+              <p className="text-xs text-slate-400 truncate max-w-sm">
+                {assetId ? (assetName || 'Monitored Asset') : `Issue: ${assetName || 'Unlinked Complaint'}`}
+              </p>
             </div>
           </div>
           <button

@@ -4,6 +4,7 @@ import {
   SharedIssue,
   Department,
   InfrastructureAsset,
+  InfrastructureIncident,
   User,
   CitizenReport,
   ReportImage,
@@ -16,6 +17,7 @@ import {
 } from '../models/index.js';
 import { authenticateToken, requireRole, optionalAuth } from '../middleware/auth.js';
 import { calculateDistanceMeters } from '../utils/duplicateDetector.js';
+import { calculateInfrastructureRisk } from '../utils/riskPredictor.js';
 
 const router = express.Router();
 
@@ -686,6 +688,160 @@ router.post('/:id/separate', authenticateToken, requireRole('admin'), async (req
   } catch (err) {
     console.error('Separate error:', err);
     res.status(500).json({ error: 'Failed to separate report.' });
+  }
+});
+
+function areCategoriesCompatible(issueCategory, assetCategory) {
+  if (!issueCategory || !assetCategory) return true;
+  const ic = issueCategory.toLowerCase();
+  const ac = assetCategory.toLowerCase();
+  if (ic === ac) return true;
+  if ((ic.includes('road') || ic.includes('pothole')) && (ac.includes('road') || ac.includes('pothole'))) return true;
+  if ((ic.includes('light') || ic.includes('electr')) && (ac.includes('light') || ac.includes('electr'))) return true;
+  if ((ic.includes('water') || ic.includes('leak')) && (ac.includes('water') || ac.includes('pipe') || ac.includes('drain'))) return true;
+  if ((ic.includes('drain') || ic.includes('sewag')) && (ac.includes('drain') || ac.includes('sewag') || ac.includes('water'))) return true;
+  if ((ic.includes('build') || ic.includes('facil') || ic.includes('struct')) && (ac.includes('build') || ac.includes('facil') || ac.includes('struct'))) return true;
+  if ((ic.includes('garb') || ic.includes('sanit') || ic.includes('waste')) && (ac.includes('garb') || ac.includes('sanit') || ac.includes('waste'))) return true;
+  if (ic.includes('other') || ac.includes('other')) return true;
+  return false;
+}
+
+// 11. Associate an existing complaint issue with an infrastructure asset (ADMIN ONLY)
+router.post('/:id/associate-asset', authenticateToken, requireRole('admin'), async (req, res) => {
+  try {
+    const issue = await findIssue(req.params.id);
+    if (!issue) {
+      return res.status(404).json({ error: 'Complaint issue not found.' });
+    }
+
+    const { asset_id } = req.body;
+    if (!asset_id) {
+      return res.status(400).json({ error: 'An infrastructure asset ID is required.' });
+    }
+
+    let asset = null;
+    if (mongoose.Types.ObjectId.isValid(asset_id)) {
+      asset = await InfrastructureAsset.findById(asset_id);
+    }
+    if (!asset) {
+      asset = await InfrastructureAsset.findOne({ asset_code: String(asset_id).trim().toUpperCase() });
+    }
+    if (!asset && !isNaN(Number(asset_id))) {
+      asset = await InfrastructureAsset.findOne({ legacy_id: Number(asset_id) });
+    }
+
+    if (!asset) {
+      return res.status(404).json({ error: 'Selected infrastructure asset not found.' });
+    }
+
+    // Validate category compatibility
+    if (!areCategoriesCompatible(issue.category, asset.category)) {
+      return res.status(400).json({
+        error: `Category mismatch: Cannot associate a "${issue.category}" complaint with a "${asset.category}" asset. Please select a compatible asset.`
+      });
+    }
+
+    // Link asset to issue
+    const previousAssetId = issue.infrastructure_id;
+    issue.infrastructure_id = asset._id;
+
+    // Align department if issue has none
+    if (!issue.department_id && asset.department_id) {
+      issue.department_id = asset.department_id;
+    }
+
+    // Create or reassign incident for recurrence tracking
+    let incident = null;
+    if (issue.incident_id) {
+      incident = await InfrastructureIncident.findById(issue.incident_id);
+      if (incident) {
+        incident.infrastructure_id = asset._id;
+        await incident.save();
+      }
+    }
+
+    if (!incident) {
+      const priorCount = await InfrastructureIncident.countDocuments({ infrastructure_id: asset._id });
+      const recurrenceSeq = priorCount + 1;
+      const incCode = `INC-${asset.asset_code}-${recurrenceSeq}`;
+      incident = await InfrastructureIncident.create({
+        incident_code: incCode,
+        infrastructure_id: asset._id,
+        shared_issue_id: issue._id,
+        incident_type: issue.title,
+        description: issue.description,
+        started_at: issue.first_reported_at || issue.created_at || new Date(),
+        recurrence_sequence: recurrenceSeq
+      });
+      issue.incident_id = incident._id;
+    }
+
+    // Link any existing repairs on this issue that were previously unlinked
+    await RepairRecord.updateMany(
+      { shared_issue_id: issue._id, infrastructure_id: null },
+      { infrastructure_id: asset._id, incident_id: incident._id }
+    );
+
+    await issue.save();
+
+    // Recalculate asset risk score & health status
+    const allIncidents = await InfrastructureIncident.find({ infrastructure_id: asset._id });
+    const allRepairs = await RepairRecord.find({ infrastructure_id: asset._id });
+    const openCount = await SharedIssue.countDocuments({
+      infrastructure_id: asset._id,
+      status: { $ne: 'Resolved' }
+    });
+
+    const updatedRisk = calculateInfrastructureRisk({
+      asset,
+      distinctIncidents: allIncidents,
+      repairRecords: allRepairs,
+      unresolvedIssuesCount: openCount
+    });
+
+    asset.current_health_status = updatedRisk.healthStatus;
+    asset.risk_score = updatedRisk.riskScore;
+    asset.risk_level = updatedRisk.riskLevel;
+    asset.risk_reasons = updatedRisk.reasons;
+    await asset.save();
+
+    // Audit Log & Status History
+    await StatusHistory.create({
+      shared_issue_id: issue._id,
+      old_status: issue.status,
+      new_status: issue.status,
+      changed_by_user_id: req.user.id,
+      comments: `Administrator associated complaint with asset ${asset.asset_code} (${asset.name})`
+    });
+
+    await AuditLog.create({
+      action: 'ISSUE_ASSET_ASSOCIATED',
+      entity_type: 'shared_issue',
+      entity_id: issue._id,
+      user_id: req.user.id,
+      details: JSON.stringify({
+        issue_code: issue.issue_code,
+        previous_asset_id: previousAssetId ? previousAssetId.toString() : null,
+        associated_asset_id: asset._id.toString(),
+        asset_code: asset.asset_code,
+        asset_name: asset.name
+      })
+    });
+
+    res.json({
+      message: `Complaint ${issue.issue_code} successfully associated with asset ${asset.asset_code}.`,
+      issueId: issue._id.toString(),
+      issueCode: issue.issue_code,
+      assetId: asset._id.toString(),
+      assetCode: asset.asset_code,
+      assetName: asset.name,
+      assetCategory: asset.category,
+      assetHealthStatus: asset.current_health_status,
+      assetRiskScore: asset.risk_score
+    });
+  } catch (err) {
+    console.error('Associate asset error:', err);
+    res.status(500).json({ error: 'Failed to associate infrastructure asset.' });
   }
 });
 
